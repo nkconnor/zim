@@ -255,7 +255,9 @@ mod tests {
         finder.add_char('e');
         finder.add_char('d');
         finder.update_matches().unwrap();
-        
+ 
+
+        // just a comment      
         // Should match files with "ed" in them
         let matches: Vec<&String> = finder.matches().iter().map(|(path, _)| path).collect();
         assert!(matches.contains(&&"src/editor/mod.rs".to_string()));

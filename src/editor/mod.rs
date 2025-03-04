@@ -968,11 +968,8 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             // Stay in normal mode if there was an error
                             self.mode = Mode::Normal;
                             self.save_and_quit = false;
-                            println!("Error saving file: {}", e);
+                            // Error will be displayed in UI status line
                         } else {
-                            // Show a success message
-                            println!("File saved successfully: {}", path);
-                            
                             // Add to recent files list
                             self.file_finder.add_recent_file(&path);
                             
@@ -1028,11 +1025,9 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     let filename = self.filename_prompt_text.trim().to_string();
                     
                     // Save the file with the new name
-                    if let Err(e) = self.current_tab_mut().buffer.save(Some(&filename)) {
-                        println!("Error saving file: {}", e);
+                    if let Err(_) = self.current_tab_mut().buffer.save(Some(&filename)) {
+                        // Error will be displayed in status bar
                     } else {
-                        println!("File saved successfully: {}", filename);
-                        
                         // Add to recent files
                         self.file_finder.add_recent_file(&filename);
                         
@@ -1043,7 +1038,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         }
                     }
                 } else {
-                    println!("Error: Empty filename");
+                    // Error will be displayed in status bar
                 }
                 
                 // Reset and return to normal mode
@@ -1139,8 +1134,8 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         // Shortcut for reloading file (directly from normal mode)
                         if let Some(path) = &self.current_tab().buffer.file_path.clone() {
                             if !path.starts_with("untitled-") {
-                                if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
-                                    println!("Error reloading file: {}", e);
+                                if let Err(_) = self.current_tab_mut().buffer.load_file(path) {
+                                    // Error will be displayed in status bar
                                 }
                             }
                         }
@@ -1775,14 +1770,14 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         if path.starts_with("untitled-") {
                             // Need a real filename
                             // TODO: Implement a filename prompt
-                            println!("Error: No filename specified. Use :w filename");
+                            // Error will be displayed in status bar
                         } else {
-                            if let Err(e) = self.current_tab_mut().buffer.save(None) {
-                                println!("Error saving file: {}", e);
+                            if let Err(_) = self.current_tab_mut().buffer.save(None) {
+                                // Error will be displayed in status bar
                             }
                         }
                     } else {
-                        println!("Error: No filename specified. Use :w filename");
+                        // Error will be displayed in status bar
                     }
                 } else if cmd.starts_with("w ") || cmd.starts_with("write ") {
                     // Write to specified file
@@ -1790,11 +1785,11 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     if parts.len() > 1 {
                         let filename = parts[1].trim();
                         if !filename.is_empty() {
-                            if let Err(e) = self.current_tab_mut().buffer.save(Some(filename)) {
-                                println!("Error saving file: {}", e);
+                            if let Err(_) = self.current_tab_mut().buffer.save(Some(filename)) {
+                                // Error will be displayed in status bar
                             }
                         } else {
-                            println!("Error: No filename specified");
+                            // Error will be displayed in status bar
                         }
                     }
                 } else if cmd == "q" || cmd == "quit" {
@@ -1805,28 +1800,28 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     if let Some(path) = &self.current_tab().buffer.file_path {
                         if path.starts_with("untitled-") {
                             // Need a real filename
-                            println!("Error: No filename specified. Use :x filename");
+                            // Error will be displayed in status bar
                         } else {
-                            if let Err(e) = self.current_tab_mut().buffer.save(None) {
-                                println!("Error saving file: {}", e);
+                            if let Err(_) = self.current_tab_mut().buffer.save(None) {
+                                // Error will be displayed in status bar
                             } else {
                                 return Ok(false); // Exit
                             }
                         }
                     } else {
-                        println!("Error: No filename specified. Use :x filename");
+                        // Error will be displayed in status bar
                     }
                 } else if cmd.starts_with("x ") {
                     // Write to file and quit (shorter than wq)
                     let filename = cmd[2..].trim();
                     if !filename.is_empty() {
-                        if let Err(e) = self.current_tab_mut().buffer.save(Some(filename)) {
-                            println!("Error saving file: {}", e);
+                        if let Err(_) = self.current_tab_mut().buffer.save(Some(filename)) {
+                            // Error will be displayed in status bar
                         } else {
                             return Ok(false); // Exit
                         }
                     } else {
-                        println!("Error: No filename specified");
+                        // Error will be displayed in status bar
                     }
                 } else if cmd == "q!" || cmd == "quit!" {
                     // Force quit
@@ -1835,8 +1830,8 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     // Refresh current file (reload from disk)
                     if let Some(path) = &self.current_tab().buffer.file_path.clone() {
                         if !path.starts_with("untitled-") {
-                            if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
-                                println!("Error reloading file: {}", e);
+                            if let Err(_) = self.current_tab_mut().buffer.load_file(path) {
+                                // Error will be displayed in status bar
                             }
                         }
                     }
