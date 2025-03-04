@@ -16,3 +16,6 @@ toml = "0.7"
 dirs = "5.0"
 walkdir = "2.3"
 fuzzy-matcher = "0.3"
+
+[dev-dependencies]
+tempfile = "3.8"

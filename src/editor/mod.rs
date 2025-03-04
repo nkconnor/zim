@@ -53,6 +53,7 @@ pub struct Editor {
     pub config: Config,
     pub save_and_quit: bool,
     pub command_text: String,
+    pub filename_prompt_text: String,
 }
 
 impl Editor {
@@ -74,6 +75,7 @@ impl Editor {
             config,
             save_and_quit: false,
             command_text: String::new(),
+            filename_prompt_text: String::new(),
         }
     }
     
@@ -220,6 +222,7 @@ impl Editor {
             Mode::FileFinder => self.handle_file_finder_mode(key),
             Mode::Help => self.handle_help_mode(key),
             Mode::WriteConfirm => self.handle_write_confirm_mode(key),
+            Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
         }
     }
     
@@ -235,13 +238,15 @@ impl Editor {
                 // User confirmed write operation
                 if let Some(path) = current_path {
                     if path.starts_with("untitled-") {
-                        // Need a real filename
-                        // TODO: Implement a filename prompt
-                        println!("Error: No filename specified. Need to implement filename prompt");
-                        self.mode = Mode::Normal;
+                        // Need a real filename - enter filename prompt mode
+                        self.filename_prompt_text.clear();
+                        self.mode = Mode::FilenamePrompt;
                         return Ok(true);
                     } else {
                         if let Err(e) = self.current_tab_mut().buffer.save(None) {
+                            // Stay in normal mode if there was an error
+                            self.mode = Mode::Normal;
+                            self.save_and_quit = false;
                             println!("Error saving file: {}", e);
                         } else {
                             // Show a success message
@@ -252,12 +257,17 @@ impl Editor {
                                 self.save_and_quit = false;
                                 return Ok(false); // Exit the editor
                             }
+                            
+                            // Return to normal mode
+                            self.mode = Mode::Normal;
                         }
                     }
                 } else {
-                    println!("Error: No filename specified. Need to implement filename prompt");
+                    // No filename, enter filename prompt mode
+                    self.filename_prompt_text.clear();
+                    self.mode = Mode::FilenamePrompt;
+                    return Ok(true);
                 }
-                self.mode = Mode::Normal;
                 Ok(true)
             },
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -269,6 +279,57 @@ impl Editor {
             },
             _ => Ok(true), // Ignore other keys in write confirm mode
         }
+    }
+    
+    fn handle_filename_prompt_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        use crossterm::event::KeyCode;
+        
+        let should_quit = self.save_and_quit;
+        
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel the filename prompt
+                self.filename_prompt_text.clear();
+                self.save_and_quit = false;
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Enter => {
+                // Validate and save the file with the provided filename
+                if !self.filename_prompt_text.trim().is_empty() {
+                    let filename = self.filename_prompt_text.trim().to_string();
+                    
+                    // Save the file with the new name
+                    if let Err(e) = self.current_tab_mut().buffer.save(Some(&filename)) {
+                        println!("Error saving file: {}", e);
+                    } else {
+                        println!("File saved successfully: {}", filename);
+                        
+                        // Check if we should quit after saving
+                        if should_quit {
+                            self.save_and_quit = false;
+                            return Ok(false); // Exit the editor
+                        }
+                    }
+                } else {
+                    println!("Error: Empty filename");
+                }
+                
+                // Reset and return to normal mode
+                self.filename_prompt_text.clear();
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Char(c) => {
+                // Add the character to the filename
+                self.filename_prompt_text.push(c);
+            },
+            KeyCode::Backspace => {
+                // Remove the last character from the filename
+                self.filename_prompt_text.pop();
+            },
+            _ => {}
+        }
+        
+        Ok(true)
     }
     
     fn handle_help_mode(&mut self, key: KeyEvent) -> Result<bool> {
@@ -306,8 +367,10 @@ impl Editor {
                     "quit" => return Ok(false),
                     "insert_mode" => self.mode = Mode::Insert,
                     "save_file" => {
-                        // Enter write confirmation mode instead of saving directly
+                        // Enter write confirmation mode with modified text highlighted
                         self.mode = Mode::WriteConfirm;
+                        // Make sure save_and_quit flag is reset
+                        self.save_and_quit = false;
                     },
                     "reload_file" => {
                         // Shortcut for reloading file (directly from normal mode)
@@ -477,6 +540,27 @@ impl Editor {
             KeyCode::Char('q') => return Ok(false),
             KeyCode::Char('i') => self.mode = Mode::Insert,
             KeyCode::Char(':') => self.mode = Mode::Command,
+            // Add explicit handling for w (write/save)
+            KeyCode::Char('w') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Enter write confirmation mode
+                self.mode = Mode::WriteConfirm;
+                self.save_and_quit = false;
+            },
+            // Add explicit handling for e (edit/reload)
+            KeyCode::Char('e') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if let Some(path) = &self.current_tab().buffer.file_path.clone() {
+                    if !path.starts_with("untitled-") {
+                        if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
+                            eprintln!("Error reloading file: {}", e);
+                        }
+                    }
+                }
+            },
+            // Add explicit handling for x (save and quit)
+            KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.save_and_quit = true;
+                self.mode = Mode::WriteConfirm;
+            },
             KeyCode::Char('h') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let tab = self.current_tab_mut();
                 tab.cursor.move_left(&tab.buffer);
@@ -822,6 +906,9 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::fs;
+    use tempfile::tempdir;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     
     #[test]
     fn test_tab_navigation() {
@@ -928,5 +1015,157 @@ mod tests {
         editor.next_tab();
         assert_eq!(editor.current_tab, 1);
         assert_eq!(editor.current_tab().buffer.get_content(), "File 2 content");
+    }
+    
+    #[test]
+    fn test_write_confirmation_mode() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Simulate editing a buffer by inserting text
+        let cursor = &editor.current_tab().cursor.clone();
+        editor.current_tab_mut().buffer.insert_char_at_cursor('H', cursor);
+        
+        // Check that the modified flag is set
+        assert!(editor.current_tab().buffer.is_modified);
+        assert_eq!(editor.current_tab().buffer.get_modified_lines().len(), 1);
+        
+        // Enter write confirmation mode via w key
+        let w_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE);
+        let _ = editor.handle_normal_mode(w_key);
+        
+        // Check that we're in WriteConfirm mode
+        assert_eq!(editor.mode, Mode::WriteConfirm);
+        
+        // Press ESC to cancel
+        let esc_key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let _ = editor.handle_write_confirm_mode(esc_key);
+        
+        // Should be back in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
+        
+        // Buffer should still be modified
+        assert!(editor.current_tab().buffer.is_modified);
+    }
+    
+    #[test]
+    fn test_modified_line_tracking() {
+        let mut buffer = Buffer::new();
+        let mut cursor = Cursor::new();
+        
+        // Initially no lines are modified
+        assert_eq!(buffer.get_modified_lines().len(), 0);
+        
+        // Insert characters
+        buffer.insert_char_at_cursor('a', &cursor);
+        buffer.insert_char_at_cursor('b', &cursor);
+        cursor.x = 2;
+        buffer.insert_char_at_cursor('c', &cursor);
+        
+        // Check that we have one modified line
+        assert_eq!(buffer.get_modified_lines().len(), 1);
+        assert!(buffer.is_line_modified(0));
+        
+        // Add a new line
+        cursor.x = 3;
+        buffer.insert_newline_at_cursor(&cursor);
+        
+        // Check that we now have two modified lines
+        assert_eq!(buffer.get_modified_lines().len(), 2);
+        assert!(buffer.is_line_modified(0));
+        assert!(buffer.is_line_modified(1));
+        
+        // Delete a character
+        cursor.y = 1;
+        cursor.x = 0;
+        buffer.insert_char_at_cursor('x', &cursor);
+        buffer.delete_char_at_cursor(&cursor);
+        
+        // Still two modified lines (same line modified again)
+        assert_eq!(buffer.get_modified_lines().len(), 2);
+    }
+    
+    #[test]
+    fn test_filename_prompt_mode() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Enter WriteConfirm mode
+        editor.mode = Mode::WriteConfirm;
+        
+        // Simulate pressing Y to confirm
+        let y_key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        let _ = editor.handle_write_confirm_mode(y_key);
+        
+        // Should now be in FilenamePrompt mode since we have an untitled file
+        assert_eq!(editor.mode, Mode::FilenamePrompt);
+        
+        // Type a filename
+        let t_key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let e_key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+        let s_key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE);
+        let t2_key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let dot_key = KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE);
+        let t3_key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        let x_key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        let t4_key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        
+        let _ = editor.handle_filename_prompt_mode(t_key);
+        let _ = editor.handle_filename_prompt_mode(e_key);
+        let _ = editor.handle_filename_prompt_mode(s_key);
+        let _ = editor.handle_filename_prompt_mode(t2_key);
+        let _ = editor.handle_filename_prompt_mode(dot_key);
+        let _ = editor.handle_filename_prompt_mode(t3_key);
+        let _ = editor.handle_filename_prompt_mode(x_key);
+        let _ = editor.handle_filename_prompt_mode(t4_key);
+        
+        // Check that the filename is stored
+        assert_eq!(editor.filename_prompt_text, "test.txt");
+        
+        // Press Escape to cancel
+        let esc_key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let _ = editor.handle_filename_prompt_mode(esc_key);
+        
+        // Should be back in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
+        
+        // And filename prompt should be cleared
+        assert_eq!(editor.filename_prompt_text, "");
+    }
+    
+    #[test]
+    fn test_save_file_flow() -> Result<()> {
+        // Create a temporary directory for test files
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test_save.txt");
+        let file_path_str = file_path.to_str().unwrap();
+        
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Set up initial content
+        let cursor = &editor.current_tab().cursor.clone();
+        editor.current_tab_mut().buffer.insert_char_at_cursor('T', cursor);
+        editor.current_tab_mut().buffer.file_path = Some(file_path_str.to_string());
+        
+        // Verify it's modified
+        assert!(editor.current_tab().buffer.is_modified);
+        
+        // Enter write confirm mode
+        editor.mode = Mode::WriteConfirm;
+        
+        // Confirm saving
+        let y_key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        let _ = editor.handle_write_confirm_mode(y_key);
+        
+        // Verify the file exists and has the correct content
+        let content = fs::read_to_string(&file_path)?;
+        assert_eq!(content, "T");
+        
+        // Verify the buffer is no longer marked as modified
+        assert!(!editor.current_tab().buffer.is_modified);
+        assert_eq!(editor.current_tab().buffer.get_modified_lines().len(), 0);
+        
+        Ok(())
     }
 }

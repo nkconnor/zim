@@ -1,5 +1,6 @@
 use super::Buffer;
 
+#[derive(Debug, Clone, Copy)]
 pub struct Cursor {
     pub x: usize, // Column
     pub y: usize, // Row

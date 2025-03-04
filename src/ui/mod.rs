@@ -41,6 +41,13 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) -> Option<ViewportU
         Mode::Help => {
             render_help_page(f, editor, chunks[1]);
         },
+        Mode::WriteConfirm => {
+            // In WriteConfirm mode, we still show the editor but highlight modified lines
+            viewport_update = render_editor_area_with_highlights(f, editor, chunks[1]);
+        },
+        Mode::FilenamePrompt => {
+            render_filename_prompt(f, editor, chunks[1]);
+        },
         _ => {
             viewport_update = render_editor_area(f, editor, chunks[1]);
         }
@@ -140,7 +147,13 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     f.render_widget(tabs_paragraph, inner_area);
 }
 
-fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+// Common rendering function that can optionally highlight modified lines
+fn render_editor_area_inner<B: Backend>(
+    f: &mut Frame<B>, 
+    editor: &Editor, 
+    area: Rect, 
+    highlight_modified: bool
+) -> Option<ViewportUpdate> {
     // Get the current tab
     let tab = editor.current_tab();
     
@@ -176,14 +189,21 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         .enumerate()
         .map(|(idx, line)| {
             let line_number = start_line + idx + 1; // 1-indexed line numbers
+            let current_line_idx = start_line + idx;
+            let is_modified = tab.buffer.is_line_modified(current_line_idx);
+            
+            // Style the line number based on modification status if highlighting is enabled
+            let number_style = if highlight_modified && is_modified {
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            
             let number_str = format!("{:>width$} ", line_number, width=line_num_width);
             
             // Create line with number followed by content
             let mut spans = vec![
-                tui::text::Span::styled(
-                    number_str, 
-                    Style::default().fg(Color::DarkGray)
-                )
+                tui::text::Span::styled(number_str, number_style)
             ];
             
             // Add the actual line content with diagnostic highlighting if needed
@@ -193,9 +213,16 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
                 "".to_string()
             };
             
-            // Check if there are diagnostics for this line
+            // Choose whether to add diagnostic or modification highlighting
             let current_line = start_line + idx;
-            if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
+            
+            if highlight_modified && is_modified {
+                // In WriteConfirm mode, highlight the entire modified line
+                spans.push(tui::text::Span::styled(
+                    content,
+                    Style::default().fg(Color::Green)
+                ));
+            } else if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
                 // If there are diagnostics, create styled spans based on the diagnostics
                 if !line_diagnostics.is_empty() && !content.is_empty() {
                     let mut pos = 0;
@@ -294,6 +321,106 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         width: viewport.width,
         height: viewport.height,
     })
+}
+
+fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+    render_editor_area_inner(f, editor, area, false)
+}
+
+fn render_editor_area_with_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+    render_editor_area_inner(f, editor, area, true)
+}
+
+fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Create a centered box for the filename prompt
+    let prompt_area = centered_rect(60, 20, area);
+    
+    let prompt_block = Block::default()
+        .title(" Enter Filename ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    
+    let inner_area = prompt_block.inner(prompt_area);
+    f.render_widget(prompt_block, prompt_area);
+    
+    // Render prompt text and input field
+    let mut content = vec![
+        Line::from(vec![
+            tui::text::Span::raw("")
+        ]),
+        Line::from(vec![
+            tui::text::Span::styled(
+                "Please enter a filename to save:",
+                Style::default().add_modifier(Modifier::BOLD)
+            )
+        ]),
+        Line::from(vec![
+            tui::text::Span::raw("")
+        ]),
+        Line::from(vec![
+            tui::text::Span::styled(
+                format!("> {}", editor.filename_prompt_text),
+                Style::default().fg(Color::Green)
+            )
+        ]),
+        Line::from(vec![
+            tui::text::Span::raw("")
+        ]),
+        Line::from(vec![
+            tui::text::Span::styled(
+                "Press Enter to save, Esc to cancel",
+                Style::default().fg(Color::DarkGray)
+            )
+        ]),
+    ];
+    
+    // Add message if we're saving and quitting
+    if editor.save_and_quit {
+        content.push(Line::from(vec![
+            tui::text::Span::raw("")
+        ]));
+        content.push(Line::from(vec![
+            tui::text::Span::styled(
+                "Editor will exit after saving",
+                Style::default().fg(Color::Yellow)
+            )
+        ]));
+    }
+    
+    let prompt_text = Paragraph::new(content)
+        .alignment(tui::layout::Alignment::Center)
+        .wrap(Wrap { trim: true });
+    
+    f.render_widget(prompt_text, inner_area);
+    
+    // Position cursor at the end of the input field
+    let prompt_prefix_len = 2; // "> " is 2 chars
+    let cursor_pos_x = inner_area.x + (inner_area.width - prompt_prefix_len - editor.filename_prompt_text.len() as u16) / 2 
+                      + prompt_prefix_len + editor.filename_prompt_text.len() as u16;
+    let cursor_pos_y = inner_area.y + 3; // Position at the input line
+    
+    f.set_cursor(cursor_pos_x, cursor_pos_y);
+}
+
+// Helper function to create a centered rect using percentage of the available space
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ].as_ref())
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ].as_ref())
+        .split(popup_layout[1])[1]
 }
 
 fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
@@ -473,11 +600,26 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
             Style::default().fg(Color::Cyan)
         )
     ]));
-    text.push(Line::from("w         - Save current file (prompts for confirmation)"));
-    text.push(Line::from("e         - Reload current file from disk"));
-    text.push(Line::from("x         - Save and quit (prompts for confirmation)"));
-    text.push(Line::from("q         - Quit"));
-    text.push(Line::from("q!        - Force quit (discard changes)"));
+    text.push(Line::from(vec![
+        tui::text::Span::styled("w", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("         - Save current file (prompts for confirmation)")
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled("e", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("         - Reload current file from disk")
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled("x", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("         - Save and quit (prompts for confirmation)")
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled("q", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("         - Quit")
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(":q!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("       - Force quit (discard changes)")
+    ]));
     text.push(Line::from(""));
     
     // Cargo integration
@@ -529,10 +671,12 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::FileFinder => "FILE FINDER".to_string(),
         Mode::Help => "HELP".to_string(),
         Mode::WriteConfirm => "WRITE? (y/n)".to_string(),
+        Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
     };
     
     let status = match editor.mode {
         Mode::FileFinder => format!("{} | Press Enter to select, Esc to cancel", mode_text),
+        Mode::FilenamePrompt => format!("{} | Press Enter to save, Esc to cancel", mode_text),
         Mode::WriteConfirm => {
             // Get current file info for write confirmation
             let file_info = if let Some(path) = &editor.current_tab().buffer.file_path {
@@ -544,7 +688,12 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             } else {
                 "No filename specified".to_string()
             };
-            format!("{} | Save file: {} | Press Y to confirm, N to cancel", mode_text, file_info)
+            
+            // Count modified lines
+            let modified_line_count = editor.current_tab().buffer.get_modified_lines().len();
+            
+            format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel", 
+                mode_text, file_info, modified_line_count)
         },
         _ => {
             // Get current tab info

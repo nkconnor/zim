@@ -13,4 +13,6 @@ pub enum Mode {
     Help,
     /// Write confirmation mode (for confirming file write)
     WriteConfirm,
+    /// Filename prompt mode (for providing a filename when saving)
+    FilenamePrompt,
 }

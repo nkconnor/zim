@@ -1,10 +1,13 @@
 use anyhow::{Context, Result};
 use std::fs;
+use std::collections::HashSet;
 use super::cursor::Cursor;
 
 pub struct Buffer {
     pub lines: Vec<String>,
     pub file_path: Option<String>,
+    pub modified_lines: HashSet<usize>,
+    pub is_modified: bool,
 }
 
 impl Buffer {
@@ -12,6 +15,8 @@ impl Buffer {
         Self {
             lines: vec![String::new()],
             file_path: None,
+            modified_lines: HashSet::new(),
+            is_modified: false,
         }
     }
 
@@ -29,6 +34,10 @@ impl Buffer {
         // Store the file path
         self.file_path = Some(path.to_string());
         
+        // Clear modification state
+        self.modified_lines.clear();
+        self.is_modified = false;
+        
         Ok(())
     }
 
@@ -37,6 +46,7 @@ impl Buffer {
             // Add empty lines if cursor is beyond current lines
             while cursor.y >= self.lines.len() {
                 self.lines.push(String::new());
+                self.modified_lines.insert(self.lines.len() - 1);
             }
         }
 
@@ -52,6 +62,10 @@ impl Buffer {
             // Insert character at cursor position
             line.insert(cursor.x, c);
         }
+        
+        // Mark line as modified
+        self.modified_lines.insert(cursor.y);
+        self.is_modified = true;
     }
 
     pub fn delete_char_at_cursor(&mut self, cursor: &Cursor) {
@@ -59,6 +73,9 @@ impl Buffer {
             let line = &mut self.lines[cursor.y];
             if cursor.x < line.len() {
                 line.remove(cursor.x);
+                // Mark line as modified
+                self.modified_lines.insert(cursor.y);
+                self.is_modified = true;
             }
         }
     }
@@ -68,6 +85,7 @@ impl Buffer {
             // Add empty lines if cursor is beyond current lines
             while cursor.y >= self.lines.len() {
                 self.lines.push(String::new());
+                self.modified_lines.insert(self.lines.len() - 1);
             }
         }
 
@@ -83,6 +101,11 @@ impl Buffer {
         }
 
         self.lines.insert(cursor.y + 1, new_line);
+        
+        // Mark both lines as modified
+        self.modified_lines.insert(cursor.y);
+        self.modified_lines.insert(cursor.y + 1);
+        self.is_modified = true;
     }
 
     pub fn get_line(&self, y: usize) -> &str {
@@ -145,7 +168,21 @@ impl Buffer {
             self.file_path = Some(file_path.clone());
         }
         
+        // Clear modification state after successful save
+        self.modified_lines.clear();
+        self.is_modified = false;
+        
         // Return the path that was saved to
         Ok(file_path)
+    }
+    
+    /// Check if line is modified
+    pub fn is_line_modified(&self, line_idx: usize) -> bool {
+        self.modified_lines.contains(&line_idx)
+    }
+    
+    /// Get all modified line indices
+    pub fn get_modified_lines(&self) -> &HashSet<usize> {
+        &self.modified_lines
     }
 }
