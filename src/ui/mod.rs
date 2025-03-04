@@ -54,6 +54,10 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
         Mode::FilenamePrompt => {
             render_filename_prompt(f, editor, chunks[1]);
         },
+        Mode::Visual | Mode::VisualLine => {
+            // In Visual modes, highlight the selection
+            viewport_update = render_editor_area_with_selection(f, editor, chunks[1]);
+        },
         _ => {
             viewport_update = render_editor_area(f, editor, chunks[1]);
         }
@@ -493,6 +497,12 @@ fn render_editor_area_with_diff_highlights<B: Backend>(f: &mut Frame<B>, editor:
     render_editor_area_inner(f, editor, area, true, true)
 }
 
+// Use function stub until we fix rendering issues
+fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut Editor, area: Rect) -> Option<ViewportUpdate> {
+    // For now, just use the regular editor rendering
+    render_editor_area(f, editor, area)
+}
+
 fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create a centered box for the filename prompt
     let prompt_area = centered_rect(60, 20, area);
@@ -840,8 +850,8 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
         tui::text::Span::raw("         - Reload current file from disk (prompts with diff highlighting)")
     ]));
     text.push(Line::from(vec![
-        tui::text::Span::styled("X", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Save and quit (prompts for confirmation)")
+        tui::text::Span::styled("X or ZZ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("    - Save and quit (prompts for confirmation)")
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled("q", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
@@ -904,6 +914,8 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::WriteConfirm => "WRITE? (y/n/q)".to_string(),
         Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
         Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
+        Mode::Visual => "VISUAL".to_string(),
+        Mode::VisualLine => "VISUAL LINE".to_string(),
     };
     
     let status = match editor.mode {

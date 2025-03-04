@@ -17,4 +17,8 @@ pub enum Mode {
     FilenamePrompt,
     /// Reload confirmation mode (for confirming file reload)
     ReloadConfirm,
+    /// Visual mode (for character-based selections)
+    Visual,
+    /// Visual Line mode (for line-based selections)
+    VisualLine,
 }

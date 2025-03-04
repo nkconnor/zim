@@ -5,6 +5,7 @@ use super::cursor::Cursor;
 use similar::{ChangeTag, TextDiff};
 use syntect::parsing::SyntaxReference;
 use std::sync::Arc;
+use std::cmp::{min, max};
 
 pub struct Buffer {
     pub lines: Vec<String>,
@@ -12,6 +13,7 @@ pub struct Buffer {
     pub modified_lines: HashSet<usize>,
     pub is_modified: bool,
     pub syntax: Option<Arc<SyntaxReference>>,
+    pub selection_start: Option<(usize, usize)>, // (line, column)
 }
 
 impl Buffer {
@@ -22,7 +24,212 @@ impl Buffer {
             modified_lines: HashSet::new(),
             is_modified: false,
             syntax: None,
+            selection_start: None,
         }
+    }
+    
+    /// Start a selection at the current cursor position
+    pub fn start_selection(&mut self, position: (usize, usize)) {
+        self.selection_start = Some(position);
+    }
+    
+    /// Clear the current selection
+    pub fn clear_selection(&mut self) {
+        self.selection_start = None;
+    }
+    
+    /// Check if a position is within the current selection
+    pub fn is_position_selected(&self, line: usize, column: usize, cursor: &Cursor) -> bool {
+        if let Some(start) = self.selection_start {
+            let (start_line, start_col) = start;
+            let (end_line, end_col) = (cursor.y, cursor.x);
+            
+            // Ensure start is before end
+            let (first_line, first_col, last_line, last_col) = if start_line < end_line || 
+                (start_line == end_line && start_col <= end_col) {
+                (start_line, start_col, end_line, end_col)
+            } else {
+                (end_line, end_col, start_line, start_col)
+            };
+            
+            // Check if the position is within the selection range
+            if line < first_line || line > last_line {
+                return false;
+            }
+            
+            if line == first_line && line == last_line {
+                return column >= first_col && column < last_col;
+            } else if line == first_line {
+                return column >= first_col;
+            } else if line == last_line {
+                return column < last_col;
+            }
+            
+            return true;
+        }
+        
+        false
+    }
+    
+    /// Get the selected text
+    pub fn get_selected_text(&self, cursor: &Cursor) -> String {
+        if let Some(start) = self.selection_start {
+            let (start_line, start_col) = start;
+            let (end_line, end_col) = (cursor.y, cursor.x);
+            
+            // Ensure start is before end
+            let (first_line, first_col, last_line, last_col) = if start_line < end_line || 
+                (start_line == end_line && start_col <= end_col) {
+                (start_line, start_col, end_line, end_col)
+            } else {
+                (end_line, end_col, start_line, start_col)
+            };
+            
+            // Handle selection on a single line
+            if first_line == last_line {
+                if first_line < self.lines.len() {
+                    let line = &self.lines[first_line];
+                    let end_col = min(last_col, line.len());
+                    let start_col = min(first_col, line.len());
+                    if start_col <= end_col && start_col < line.len() {
+                        return line[start_col..end_col].to_string();
+                    }
+                }
+                return String::new();
+            }
+            
+            // Handle multi-line selection
+            let mut result = String::new();
+            
+            // First line from start_col to end
+            if first_line < self.lines.len() {
+                let line = &self.lines[first_line];
+                let start_col = min(first_col, line.len());
+                if start_col < line.len() {
+                    result.push_str(&line[start_col..]);
+                }
+                result.push('\n');
+            }
+            
+            // Middle lines in their entirety
+            for line_idx in first_line+1..last_line {
+                if line_idx < self.lines.len() {
+                    result.push_str(&self.lines[line_idx]);
+                    result.push('\n');
+                }
+            }
+            
+            // Last line from start to end_col
+            if last_line < self.lines.len() {
+                let line = &self.lines[last_line];
+                let end_col = min(last_col, line.len());
+                if end_col > 0 {
+                    result.push_str(&line[..end_col]);
+                }
+            }
+            
+            return result;
+        }
+        
+        String::new()
+    }
+    
+    /// Delete the selected text and return true if deletion was performed
+    pub fn delete_selection(&mut self, cursor: &mut Cursor) -> bool {
+        if let Some(start) = self.selection_start {
+            let (start_line, start_col) = start;
+            let (end_line, end_col) = (cursor.y, cursor.x);
+            
+            // Ensure start is before end
+            let (first_line, first_col, last_line, last_col) = if start_line < end_line || 
+                (start_line == end_line && start_col <= end_col) {
+                (start_line, start_col, end_line, end_col)
+            } else {
+                (end_line, end_col, start_line, start_col)
+            };
+            
+            // Handle selection on a single line
+            if first_line == last_line && first_line < self.lines.len() {
+                let line = &mut self.lines[first_line];
+                let end_col = min(last_col, line.len());
+                let start_col = min(first_col, line.len());
+                
+                if start_col < end_col && start_col < line.len() {
+                    // Remove the selected portion of the line
+                    let suffix = if end_col < line.len() {
+                        line[end_col..].to_string()
+                    } else {
+                        String::new()
+                    };
+                    
+                    line.truncate(start_col);
+                    line.push_str(&suffix);
+                    
+                    // Mark line as modified
+                    self.modified_lines.insert(first_line);
+                    self.is_modified = true;
+                    
+                    // Move cursor to selection start
+                    cursor.y = first_line;
+                    cursor.x = start_col;
+                    
+                    // Clear selection
+                    self.selection_start = None;
+                    return true;
+                }
+            } else if first_line < self.lines.len() && last_line < self.lines.len() {
+                // First line: keep from start to first_col
+                let first_line_prefix = if first_col <= self.lines[first_line].len() {
+                    self.lines[first_line][..first_col].to_string()
+                } else {
+                    self.lines[first_line].clone()
+                };
+                
+                // Last line: keep from last_col to end
+                let last_line_suffix = if last_col < self.lines[last_line].len() {
+                    self.lines[last_line][last_col..].to_string()
+                } else {
+                    String::new()
+                };
+                
+                // Join the first line prefix with the last line suffix
+                self.lines[first_line] = first_line_prefix + &last_line_suffix;
+                
+                // Remove all lines between first_line+1 and last_line inclusive
+                if first_line + 1 <= last_line && last_line < self.lines.len() {
+                    self.lines.drain(first_line+1..=last_line);
+                }
+                
+                // Mark lines as modified
+                self.modified_lines.insert(first_line);
+                self.is_modified = true;
+                
+                // Update modified line indices
+                let removed_line_count = last_line - first_line;
+                let mut new_modified_lines = HashSet::new();
+                for &line_idx in &self.modified_lines {
+                    if line_idx <= first_line {
+                        new_modified_lines.insert(line_idx);
+                    } else if line_idx > last_line {
+                        new_modified_lines.insert(line_idx - removed_line_count);
+                    }
+                }
+                self.modified_lines = new_modified_lines;
+                
+                // Move cursor to selection start
+                cursor.y = first_line;
+                cursor.x = first_col;
+                
+                // Clear selection
+                self.selection_start = None;
+                return true;
+            }
+            
+            // Clear selection even if we didn't delete anything
+            self.selection_start = None;
+        }
+        
+        false
     }
     
     /// Set the syntax for this buffer

@@ -333,6 +333,18 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             Mode::WriteConfirm => self.handle_write_confirm_mode(key),
             Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
             Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
+            // For visual modes, just use Escape to exit for now
+            Mode::Visual | Mode::VisualLine => {
+                use crossterm::event::KeyCode;
+                match key.code {
+                    KeyCode::Esc => {
+                        self.current_tab_mut().buffer.clear_selection();
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    _ => self.handle_normal_mode(key),
+                }
+            },
         }
     }
     
@@ -743,6 +755,20 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 
                 self.update_viewport();
                 self.invalidate_highlight_cache();
+            },
+            // v to enter visual mode
+            KeyCode::Char('v') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.mode = Mode::Visual;
+                // Start selection at current cursor position
+                let current_pos = (self.current_tab().cursor.y, self.current_tab().cursor.x);
+                self.current_tab_mut().buffer.start_selection(current_pos);
+            },
+            // V to enter visual line mode
+            KeyCode::Char('V') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                self.mode = Mode::VisualLine;
+                // Start selection at beginning of current line
+                let current_line = self.current_tab().cursor.y;
+                self.current_tab_mut().buffer.start_selection((current_line, 0));
             },
             // Add handling for x (delete character and enter insert mode) - to mirror vim
             KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -1459,5 +1485,34 @@ mod tests {
         
         println!("Test completed successfully");
         Ok(())
+    }
+    
+    #[test]
+    fn test_visual_mode_basics() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Start with a tab in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
+        
+        // Check that the buffer starts with no selection
+        assert_eq!(editor.current_tab().buffer.selection_start, None);
+        
+        // Enter visual mode - this will initialize the selection
+        editor.mode = Mode::Visual;
+        let current_pos = (editor.current_tab().cursor.y, editor.current_tab().cursor.x);
+        editor.current_tab_mut().buffer.start_selection(current_pos);
+        
+        // Check that we're in visual mode and have a selection
+        assert_eq!(editor.mode, Mode::Visual);
+        assert!(editor.current_tab().buffer.selection_start.is_some());
+        
+        // Exit visual mode
+        editor.mode = Mode::Normal;
+        editor.current_tab_mut().buffer.clear_selection();
+        
+        // Check that we're back in normal mode with no selection
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!(editor.current_tab().buffer.selection_start, None);
     }
 }
