@@ -109,10 +109,25 @@ impl Default for KeyBindings {
         normal_mode.insert("run_cargo_clippy".to_string(), KeyBinding::new("y").with_modifier("ctrl"));
         
         // Tab management
-        normal_mode.insert("new_tab".to_string(), KeyBinding::new("t").with_modifier("ctrl"));
+        normal_mode.insert("new_tab".to_string(), KeyBinding::new("n").with_modifier("ctrl"));
         normal_mode.insert("close_tab".to_string(), KeyBinding::new("w").with_modifier("ctrl"));
-        normal_mode.insert("next_tab".to_string(), KeyBinding::new("tab"));
-        normal_mode.insert("prev_tab".to_string(), KeyBinding::new("tab").with_modifier("shift"));
+        // Use only the key combinations that are confirmed to work reliably
+        normal_mode.insert("next_tab".to_string(), KeyBinding::new("right").with_modifier("ctrl"));
+        normal_mode.insert("prev_tab".to_string(), KeyBinding::new("left").with_modifier("ctrl"));
+        
+        // F-key navigation for tabs (1-12)
+        normal_mode.insert("goto_tab_1".to_string(), KeyBinding::new("f1"));
+        normal_mode.insert("goto_tab_2".to_string(), KeyBinding::new("f2"));
+        normal_mode.insert("goto_tab_3".to_string(), KeyBinding::new("f3"));
+        normal_mode.insert("goto_tab_4".to_string(), KeyBinding::new("f4"));
+        normal_mode.insert("goto_tab_5".to_string(), KeyBinding::new("f5"));
+        normal_mode.insert("goto_tab_6".to_string(), KeyBinding::new("f6"));
+        normal_mode.insert("goto_tab_7".to_string(), KeyBinding::new("f7"));
+        normal_mode.insert("goto_tab_8".to_string(), KeyBinding::new("f8"));
+        normal_mode.insert("goto_tab_9".to_string(), KeyBinding::new("f9"));
+        normal_mode.insert("goto_tab_10".to_string(), KeyBinding::new("f10"));
+        normal_mode.insert("goto_tab_11".to_string(), KeyBinding::new("f11"));
+        normal_mode.insert("goto_tab_12".to_string(), KeyBinding::new("f12"));
         
         // Help
         normal_mode.insert("show_help".to_string(), KeyBinding::new("h").with_modifier("ctrl"));
@@ -198,5 +213,42 @@ impl KeyBindings {
             .with_context(|| format!("Failed to write key bindings file: {:?}", bindings_path))?;
         
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn test_key_binding_matches() {
+        // Test Ctrl+n for new tab
+        let binding = KeyBinding::new("n").with_modifier("ctrl");
+        
+        // Should match Ctrl+n
+        let ctrl_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert!(binding.matches(&ctrl_n));
+        
+        // Should not match Alt+n
+        let alt_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT);
+        assert!(!binding.matches(&alt_n));
+        
+        // Should not match just n
+        let just_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE);
+        assert!(!binding.matches(&just_n));
+    }
+    
+    #[test]
+    fn test_default_key_bindings() {
+        let bindings = KeyBindings::default();
+        
+        // Verify our new tab binding uses Ctrl+n
+        if let Some(new_tab_binding) = bindings.normal_mode.get("new_tab") {
+            assert_eq!(new_tab_binding.key, "n");
+            assert!(new_tab_binding.modifiers.contains(&"ctrl".to_string()));
+        } else {
+            panic!("No binding found for new_tab");
+        }
     }
 }

@@ -34,6 +34,12 @@ impl Tab {
         }
     }
     
+    pub fn new_with_name(name: &str) -> Self {
+        let mut tab = Self::new();
+        tab.buffer.file_path = Some(name.to_string());
+        tab
+    }
+    
     pub fn load_file(&mut self, path: &str) -> Result<()> {
         self.buffer.load_file(path)
     }
@@ -54,9 +60,9 @@ impl Editor {
     }
 
     pub fn new_with_config(config: Config) -> Self {
-        // Create a default tab
+        // Create a default tab with a name
         let mut tabs = Vec::new();
-        tabs.push(Tab::new());
+        tabs.push(Tab::new_with_name("untitled-1"));
         
         Self {
             tabs,
@@ -79,7 +85,11 @@ impl Editor {
     
     /// Add a new tab with an empty buffer
     pub fn add_tab(&mut self) {
-        self.tabs.push(Tab::new());
+        // Generate a unique name for the new tab
+        let tab_number = self.tabs.len() + 1;
+        let tab_name = format!("untitled-{}", tab_number);
+        
+        self.tabs.push(Tab::new_with_name(&tab_name));
         self.current_tab = self.tabs.len() - 1;
     }
     
@@ -98,6 +108,13 @@ impl Editor {
             } else {
                 self.current_tab - 1
             };
+        }
+    }
+    
+    /// Go to a specific tab by index (0-based)
+    pub fn go_to_tab(&mut self, index: usize) {
+        if !self.tabs.is_empty() && index < self.tabs.len() {
+            self.current_tab = index;
         }
     }
     
@@ -334,13 +351,49 @@ impl Editor {
                     "prev_tab" => {
                         self.prev_tab();
                     },
+                    "goto_tab_1" => {
+                        self.go_to_tab(0);
+                    },
+                    "goto_tab_2" => {
+                        self.go_to_tab(1);
+                    },
+                    "goto_tab_3" => {
+                        self.go_to_tab(2);
+                    },
+                    "goto_tab_4" => {
+                        self.go_to_tab(3);
+                    },
+                    "goto_tab_5" => {
+                        self.go_to_tab(4);
+                    },
+                    "goto_tab_6" => {
+                        self.go_to_tab(5);
+                    },
+                    "goto_tab_7" => {
+                        self.go_to_tab(6);
+                    },
+                    "goto_tab_8" => {
+                        self.go_to_tab(7);
+                    },
+                    "goto_tab_9" => {
+                        self.go_to_tab(8);
+                    },
+                    "goto_tab_10" => {
+                        self.go_to_tab(9);
+                    },
+                    "goto_tab_11" => {
+                        self.go_to_tab(10);
+                    },
+                    "goto_tab_12" => {
+                        self.go_to_tab(11);
+                    },
                     "show_help" => {
                         self.mode = Mode::Help;
                     },
                     "find_file" => {
                         self.mode = Mode::FileFinder;
                         self.file_finder.refresh()?;
-                    }
+                    },
                     _ => {}
                 }
                 return Ok(true);
@@ -447,6 +500,35 @@ impl Editor {
             KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::Help;
             },
+            // Ctrl+n for new tab
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.add_tab();
+            },
+            // Ctrl+Right for next tab
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.next_tab();
+            },
+            // Ctrl+Left for previous tab
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.prev_tab();
+            },
+            // Ctrl+w to close tab
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.close_tab();
+            },
+            // F-key direct tab access
+            KeyCode::F(1) => { self.go_to_tab(0); },
+            KeyCode::F(2) => { self.go_to_tab(1); },
+            KeyCode::F(3) => { self.go_to_tab(2); },
+            KeyCode::F(4) => { self.go_to_tab(3); },
+            KeyCode::F(5) => { self.go_to_tab(4); },
+            KeyCode::F(6) => { self.go_to_tab(5); },
+            KeyCode::F(7) => { self.go_to_tab(6); },
+            KeyCode::F(8) => { self.go_to_tab(7); },
+            KeyCode::F(9) => { self.go_to_tab(8); },
+            KeyCode::F(10) => { self.go_to_tab(9); },
+            KeyCode::F(11) => { self.go_to_tab(10); },
+            KeyCode::F(12) => { self.go_to_tab(11); },
             _ => {}
         }
 
@@ -568,5 +650,118 @@ impl Editor {
         }
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    
+    #[test]
+    fn test_tab_navigation() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Initially we have one tab
+        assert_eq!(editor.tabs.len(), 1);
+        assert_eq!(editor.current_tab, 0);
+        
+        // Add a new tab
+        editor.add_tab();
+        assert_eq!(editor.tabs.len(), 2);
+        assert_eq!(editor.current_tab, 1); // Should be on the new tab
+        
+        // Add another tab
+        editor.add_tab();
+        assert_eq!(editor.tabs.len(), 3);
+        assert_eq!(editor.current_tab, 2);
+        
+        // Navigate to next tab (should wrap around)
+        editor.next_tab();
+        assert_eq!(editor.current_tab, 0);
+        
+        // Navigate to previous tab (should go to last tab)
+        editor.prev_tab();
+        assert_eq!(editor.current_tab, 2);
+        
+        // Try to close a tab
+        editor.close_tab();
+        assert_eq!(editor.tabs.len(), 2);
+        assert_eq!(editor.current_tab, 1); // Index adjusts when closing current tab
+        
+        // Close another tab
+        editor.close_tab();
+        assert_eq!(editor.tabs.len(), 1);
+        assert_eq!(editor.current_tab, 0);
+        
+        // Try to close the last tab (should be prevented)
+        editor.close_tab();
+        assert_eq!(editor.tabs.len(), 1); // Should still have one tab
+        assert_eq!(editor.current_tab, 0);
+    }
+    
+    #[test]
+    fn test_direct_tab_access() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Add a few tabs
+        editor.add_tab();
+        editor.add_tab();
+        editor.add_tab();
+        editor.add_tab();
+        
+        // We should have 5 tabs total (including the initial one)
+        assert_eq!(editor.tabs.len(), 5);
+        assert_eq!(editor.current_tab, 4); // Last one added
+        
+        // Set filenames for each tab
+        editor.tabs[0].buffer.file_path = Some("file1.rs".to_string());
+        editor.tabs[1].buffer.file_path = Some("file2.rs".to_string());
+        editor.tabs[2].buffer.file_path = Some("file3.rs".to_string());
+        editor.tabs[3].buffer.file_path = Some("file4.rs".to_string());
+        editor.tabs[4].buffer.file_path = Some("file5.rs".to_string());
+        
+        // Test direct access
+        editor.go_to_tab(0);
+        assert_eq!(editor.current_tab, 0);
+        assert_eq!(editor.current_tab().buffer.file_path.as_ref().unwrap(), "file1.rs");
+        
+        editor.go_to_tab(2);
+        assert_eq!(editor.current_tab, 2);
+        assert_eq!(editor.current_tab().buffer.file_path.as_ref().unwrap(), "file3.rs");
+        
+        // Test out of bounds access (should be ignored)
+        editor.go_to_tab(10);
+        assert_eq!(editor.current_tab, 2); // Should remain unchanged
+        
+        // Test F-key behavior by simulating keypresses (just call go_to_tab directly)
+        editor.go_to_tab(3); // Equivalent to pressing F4
+        assert_eq!(editor.current_tab, 3);
+        assert_eq!(editor.current_tab().buffer.file_path.as_ref().unwrap(), "file4.rs");
+    }
+    
+    #[test]
+    fn test_tab_file_loading() {
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Add a tab and load a file in it
+        editor.add_tab();
+        assert_eq!(editor.current_tab, 1);
+        
+        // Load different files in each tab
+        let _ = editor.tabs[0].buffer.set_content("File 1 content");
+        let _ = editor.tabs[1].buffer.set_content("File 2 content");
+        
+        // Check we can switch between tabs and content is preserved
+        editor.prev_tab();
+        assert_eq!(editor.current_tab, 0);
+        assert_eq!(editor.current_tab().buffer.get_content(), "File 1 content");
+        
+        editor.next_tab();
+        assert_eq!(editor.current_tab, 1);
+        assert_eq!(editor.current_tab().buffer.get_content(), "File 2 content");
     }
 }

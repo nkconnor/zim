@@ -17,7 +17,7 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(2), // Tab bar
+            Constraint::Length(3), // Tab bar - increased height for visibility
             Constraint::Min(1),    // Editor area
             Constraint::Length(1)  // Status line
         ].as_ref())
@@ -45,9 +45,12 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
 
 /// Render the tab bar
 fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Make the tab bar more visible with a bright title and yellow border
     let tab_bar_block = Block::default()
-        .title(" Tabs ")
-        .borders(Borders::ALL);
+        .title(" TABS ")
+        .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
     
     let inner_area = tab_bar_block.inner(area);
     f.render_widget(tab_bar_block, area);
@@ -55,17 +58,32 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create tab items
     let mut tab_spans = Vec::new();
     
+    // Debug - always show at least one tab
+    if editor.tabs.is_empty() {
+        tab_spans.push(tui::text::Span::styled(
+            " F1 untitled ",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ));
+    }
+    
     for (idx, tab) in editor.tabs.iter().enumerate() {
         // Get filename for tab or show untitled
         let filename = match &tab.buffer.file_path {
             Some(path) => {
-                if let Some(filename) = std::path::Path::new(path).file_name() {
-                    filename.to_string_lossy().to_string()
+                let path_str = path.as_str();
+                // Check if it's a path or just a name
+                if path_str.contains('/') {
+                    if let Some(filename) = std::path::Path::new(path_str).file_name() {
+                        filename.to_string_lossy().to_string()
+                    } else {
+                        path_str.to_string()
+                    }
                 } else {
-                    "untitled".to_string()
+                    // It's just a name, use it directly
+                    path_str.to_string()
                 }
             },
-            None => "untitled".to_string(),
+            None => format!("untitled-{}", idx + 1),
         };
         
         // Style for current tab vs other tabs
@@ -75,9 +93,16 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
             Style::default()
         };
         
+        // Add F-key number for tab (show F1-F12 for tabs 1-12)
+        let f_key_display = if idx < 12 {
+            format!("F{} ", idx + 1)
+        } else {
+            "".to_string()
+        };
+        
         // Add tab item
         tab_spans.push(tui::text::Span::styled(
-            format!(" {} ", filename),
+            format!(" {}{} ", f_key_display, filename),
             style,
         ));
         
@@ -92,18 +117,30 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     
     // Add tab controls hint
     tab_spans.push(tui::text::Span::styled(
-        " (Ctrl+t: New, Ctrl+w: Close, Tab: Next) ",
+        " (Ctrl+n: New, Ctrl+w: Close, F1-F12: Direct access, Ctrl+left/right: Prev/Next) ",
         Style::default().fg(Color::DarkGray),
     ));
     
-    // Create tab line
+    // Create tab line - add debug count so we always see something
+    let debug_count = format!(" [DEBUG: {} tabs] ", editor.tabs.len());
+    tab_spans.push(tui::text::Span::styled(debug_count, Style::default().fg(Color::Red)));
+    
     let tabs_line = Line::from(tab_spans);
     
-    // Render tabs
+    // Create a distinct paragraph with visible background color
     let tabs_paragraph = Paragraph::new(vec![tabs_line])
-        .alignment(tui::layout::Alignment::Left);
+        .alignment(tui::layout::Alignment::Left)
+        .style(Style::default().bg(Color::Black));
     
-    f.render_widget(tabs_paragraph, inner_area);
+    // Make sure we have enough space to render
+    if inner_area.width > 1 && inner_area.height > 0 {
+        f.render_widget(tabs_paragraph, inner_area);
+    } else {
+        // Area is too small - this helps diagnose layout issues
+        let debug_para = Paragraph::new("AREA TOO SMALL")
+            .style(Style::default().fg(Color::Red));
+        f.render_widget(debug_para, area);
+    }
 }
 
 fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
@@ -383,10 +420,11 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     text.push(Line::from(vec![
         tui::text::Span::styled("Tab Management:", Style::default().add_modifier(Modifier::BOLD))
     ]));
-    text.push(Line::from("Ctrl+t - New tab"));
+    text.push(Line::from("Ctrl+n - New tab"));
     text.push(Line::from("Ctrl+w - Close tab"));
-    text.push(Line::from("Tab - Next tab"));
-    text.push(Line::from("Shift+Tab - Previous tab"));
+    text.push(Line::from("Ctrl+right - Next tab"));
+    text.push(Line::from("Ctrl+left - Previous tab"));
+    text.push(Line::from("F1-F12 - Switch directly to tabs 1-12"));
     text.push(Line::from(""));
     
     // File operations

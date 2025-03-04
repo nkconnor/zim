@@ -104,4 +104,21 @@ impl Buffer {
             0
         }
     }
+    
+    /// Get the entire content of the buffer as a single string
+    pub fn get_content(&self) -> String {
+        self.lines.join("\n")
+    }
+    
+    /// Set the entire content of the buffer from a string
+    pub fn set_content(&mut self, content: &str) -> Result<()> {
+        self.lines = content.lines().map(String::from).collect();
+        
+        // Ensure we have at least one line
+        if self.lines.is_empty() {
+            self.lines.push(String::new());
+        }
+        
+        Ok(())
+    }
 }

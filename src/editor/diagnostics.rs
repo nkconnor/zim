@@ -98,13 +98,15 @@ impl DiagnosticCollection {
     pub fn parse_cargo_output(&mut self, output: &str, current_file_path: &str) {
         self.clear();
         
-        // Extract the filename without the path for easier matching
-        let current_filename = if let Some(filename) = std::path::Path::new(current_file_path).file_name() {
-            filename.to_string_lossy().to_string()
-        } else {
-            // If we can't extract the filename, use the full path
-            current_file_path.to_string()
-        };
+        // Normalize the current file path
+        let current_file = std::path::PathBuf::from(current_file_path)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(current_file_path));
+        let current_filename = current_file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         
         // We need to handle multi-line cargo output
         let lines: Vec<&str> = output.lines().collect();
@@ -120,7 +122,15 @@ impl DiagnosticCollection {
             }
             
             // Look for diagnostic pattern
-            let (severity, message) = if let Some(error_idx) = line.find("error:") {
+            let (severity, message) = if let Some(error_idx) = line.find("error[") {
+                // Look for the ]: that ends the error code
+                if let Some(close_idx) = line[error_idx..].find("]:") {
+                    let message_start = error_idx + close_idx + 2;
+                    (DiagnosticSeverity::Error, line[message_start..].trim().to_string())
+                } else {
+                    (DiagnosticSeverity::Error, line[error_idx + 5..].trim().to_string())
+                }
+            } else if let Some(error_idx) = line.find("error:") {
                 let message_start = error_idx + "error:".len();
                 (DiagnosticSeverity::Error, line[message_start..].trim().to_string())
             } else if let Some(warning_idx) = line.find("warning:") {
@@ -148,13 +158,39 @@ impl DiagnosticCollection {
                     if parts.len() > 1 {
                         let file_info = parts[1].trim();
                         
-                        // Check if this is for the current file
-                        is_current_file = file_info.contains(&current_filename);
-                        
-                        // Parse line and column if it's for the current file
-                        if is_current_file {
-                            let file_parts: Vec<&str> = file_info.split(":").collect();
-                            if file_parts.len() > 1 {
+                        // Get file path from location line
+                        let file_parts: Vec<&str> = file_info.split(':').collect();
+                        if !file_parts.is_empty() {
+                            let reported_file_path = file_parts[0].trim();
+                            let reported_file = std::path::PathBuf::from(reported_file_path);
+                            
+                            // Get the filename from the reported file path
+                            let reported_filename = reported_file.file_name()
+                                .map(|f| f.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            
+                            // Try to match in various ways (from most specific to least specific)
+                            is_current_file = 
+                                // 1. Direct match of canonical paths (most reliable)
+                                match (reported_file.canonicalize(), current_file.canonicalize()) {
+                                    (Ok(a), Ok(b)) => a == b,
+                                    _ => false
+                                } ||
+                                // 2. Direct string match of the paths
+                                reported_file_path == current_file_path ||
+                                // 3. If current_file_path is a suffix of reported_file_path (e.g. src/main.rs matches /home/user/project/src/main.rs)
+                                reported_file_path.ends_with(current_file_path) ||
+                                // 4. If current_file_path contains just a filename and it matches the reported filename
+                                (std::path::Path::new(current_file_path).file_name().is_some() &&
+                                 !current_file_path.contains('/') && 
+                                 reported_filename == current_file_path) ||
+                                // 5. If the filenames match and the paths have src/ in common
+                                (reported_filename == current_filename &&
+                                 (reported_file_path.ends_with(&format!("src/{}", current_filename)) ||
+                                  current_file_path.ends_with(&format!("src/{}", current_filename))));
+                            
+                            // Parse line and column if it's for the current file
+                            if is_current_file && file_parts.len() > 1 {
                                 // Parse line number
                                 if let Ok(parsed_line) = file_parts[1].trim().parse::<usize>() {
                                     line_num = parsed_line.saturating_sub(1); // 0-indexed in our editor
@@ -165,17 +201,33 @@ impl DiagnosticCollection {
                                     if let Ok(parsed_col) = file_parts[2].trim().parse::<usize>() {
                                         col_start = parsed_col.saturating_sub(1); // 0-indexed
                                         
-                                        // Try to determine the span width from the code
-                                        if i + 3 < lines.len() && lines[i + 3].contains("^") {
-                                            let span_line = lines[i + 3].trim_start();
-                                            let span_width = span_line.chars().take_while(|&c| c == '^').count();
-                                            if span_width > 0 {
-                                                col_end = col_start + span_width;
-                                            } else {
-                                                col_end = col_start + 10; // Default
+                                        // Look ahead for the caret indicators (^^^) to determine span width
+                                        let mut lookahead = 2;
+                                        let mut found_caret = false;
+                                        
+                                        // Look up to 5 lines ahead for the carets
+                                        while lookahead < 6 && i + lookahead < lines.len() {
+                                            let potential_caret_line = lines[i + lookahead].trim_start();
+                                            if potential_caret_line.starts_with('^') {
+                                                let span_width = potential_caret_line.chars()
+                                                    .take_while(|&c| c == '^')
+                                                    .count();
+                                                
+                                                if span_width > 0 {
+                                                    col_end = col_start + span_width;
+                                                    found_caret = true;
+                                                    break;
+                                                }
                                             }
-                                        } else {
-                                            col_end = col_start + 10; // Default
+                                            lookahead += 1;
+                                        }
+                                        
+                                        if !found_caret {
+                                            // Use heuristic: for errors, use at least 5 chars; for warnings, more context-based
+                                            match severity {
+                                                DiagnosticSeverity::Error => col_end = col_start + 5,
+                                                _ => col_end = col_start + 10
+                                            }
                                         }
                                     }
                                 }
@@ -188,11 +240,19 @@ impl DiagnosticCollection {
             // Only add diagnostics for the current file
             if is_current_file {
                 // Create the diagnostic
-                let diagnostic = Diagnostic::new(
+                let mut diagnostic = Diagnostic::new(
                     &message,
                     severity,
                     TextSpan::new(line_num, col_start, col_end),
                 );
+                
+                // If there are 4+ lines after this one, try to extract some context
+                if i + 3 < lines.len() {
+                    let context_line = lines[i + 2];
+                    if !context_line.trim().is_empty() {
+                        diagnostic = diagnostic.with_related_info(context_line.trim());
+                    }
+                }
                 
                 self.add_diagnostic(diagnostic);
             }
@@ -253,5 +313,152 @@ mod tests {
         // Clear collection
         collection.clear();
         assert!(collection.get_diagnostics_for_line(10).is_none());
+    }
+    
+    #[test]
+    fn test_parse_error_diagnostic() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/main.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        error[E0308]: mismatched types
+          --> src/main.rs:52:18
+           |
+        52 |     let x: i32 = "not a number";
+           |            ---   ^^^^^^^^^^^^^^ expected `i32`, found `&str`
+           |            |
+           |            expected due to this
+        
+        For more information about this error, try `rustc --explain E0308`.
+        error: could not compile `zim` (bin "zim") due to 1 previous error
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify the diagnostic was parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 1);
+        
+        let diagnostics = collection.get_diagnostics_for_line(51).unwrap(); // 0-indexed, so line 52 -> 51
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostics[0].message, "mismatched types");
+        assert_eq!(diagnostics[0].span.start_column, 17); // 0-indexed
+        
+        // Check that the span width matches the ^^^^^^ indicators
+        assert!(diagnostics[0].span.end_column > diagnostics[0].span.start_column);
+    }
+    
+    #[test]
+    fn test_parse_warning_diagnostic() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/config/mod.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        warning: this import is redundant
+         --> src/config/mod.rs:2:1
+          |
+        2 | use dirs;
+          | ^^^^^^^^^ help: remove it entirely
+          |
+          = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#single_component_path_imports
+          = note: `#[warn(clippy::single_component_path_imports)]` on by default
+        
+        warning: `zim` (bin "zim") generated 1 warning
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify the diagnostic was parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 1);
+        
+        let diagnostics = collection.get_diagnostics_for_line(1).unwrap(); // 0-indexed, so line 2 -> 1
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostics[0].message, "this import is redundant");
+        assert_eq!(diagnostics[0].span.start_column, 0); // 0-indexed
+    }
+    
+    #[test]
+    fn test_parse_multiple_diagnostics() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/main.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        error[E0308]: mismatched types
+          --> src/main.rs:52:18
+           |
+        52 |     let x: i32 = "not a number";
+           |            ---   ^^^^^^^^^^^^^^ expected `i32`, found `&str`
+           |            |
+           |            expected due to this
+        
+        warning: unused variable: `x`
+          --> src/main.rs:52:9
+           |
+        52 |     let x: i32 = "not a number";
+           |         ^ help: if this is intentional, prefix it with an underscore: `_x`
+           |
+           = note: `#[warn(unused_variables)]` on by default
+        
+        error: could not compile `zim` (bin "zim") due to previous error
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify both diagnostics were parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 2);
+        
+        let diagnostics = collection.get_diagnostics_for_line(51).unwrap(); // 0-indexed, so line 52 -> 51
+        assert_eq!(diagnostics.len(), 2);
+        
+        // Find the error and warning
+        let error = diagnostics.iter().find(|d| d.severity == DiagnosticSeverity::Error).unwrap();
+        let warning = diagnostics.iter().find(|d| d.severity == DiagnosticSeverity::Warning).unwrap();
+        
+        assert_eq!(error.message, "mismatched types");
+        assert_eq!(warning.message, "unused variable: `x`");
+    }
+    
+    #[test]
+    fn test_file_path_matching() {
+        let mut collection = DiagnosticCollection::new();
+        
+        // Test with different file path formats
+        let test_cases = [
+            // Current file, diagnostic file, should match
+            ("src/main.rs", "src/main.rs", true),
+            ("/home/user/project/src/main.rs", "src/main.rs", true),
+            ("src/main.rs", "/home/user/project/src/main.rs", true),
+            ("main.rs", "src/main.rs", true),
+            ("editor/buffer.rs", "src/editor/buffer.rs", true),
+            // Different files shouldn't match
+            ("src/main.rs", "src/lib.rs", false),
+            ("src/editor/buffer.rs", "src/editor/cursor.rs", false),
+        ];
+        
+        for (idx, (current_file, diagnostic_file, should_match)) in test_cases.iter().enumerate() {
+            let cargo_output = format!(r#"
+            Checking zim v0.1.0 (/home/user/project)
+            error: test error {}
+              --> {}:10:5
+               |
+            10 |     let x = 5;
+               |     ^^^^^^^^^ test error
+            "#, idx, diagnostic_file);
+            
+            collection.clear();
+            collection.parse_cargo_output(&cargo_output, current_file);
+            
+            if *should_match {
+                assert!(!collection.get_all_diagnostics().is_empty(), 
+                    "Case {} failed: '{}' should match '{}'", idx, current_file, diagnostic_file);
+            } else {
+                assert!(collection.get_all_diagnostics().is_empty(),
+                    "Case {} failed: '{}' should NOT match '{}'", idx, current_file, diagnostic_file);
+            }
+        }
     }
 }
