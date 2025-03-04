@@ -98,6 +98,21 @@ impl Tab {
     }
 }
 
+/// Filter for the diagnostics panel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticFilter {
+    All,
+    Errors,
+    Warnings,
+    Info,
+}
+
+impl Default for DiagnosticFilter {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
 pub struct Editor {
     pub tabs: Vec<Tab>,
     pub current_tab: usize,
@@ -116,6 +131,8 @@ pub struct Editor {
     pub clipboard: String,
     /// Selected diagnostic index for the diagnostics panel
     pub selected_diagnostic_index: usize,
+    /// Current filter for the diagnostics panel
+    pub diagnostics_filter: DiagnosticFilter,
     /// Snake game instance (Easter egg)
     pub snake_game: Option<Snake>,
 }
@@ -317,6 +334,7 @@ impl Editor {
             highlighted_lines_cache: HashMap::new(),
             clipboard: String::new(),
             selected_diagnostic_index: 0,
+            diagnostics_filter: DiagnosticFilter::default(),
             snake_game: None,
         };
         
@@ -819,16 +837,38 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 // Return to normal mode
                 self.mode = Mode::Normal;
             },
+            // Handle filter switching keys
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                // Switch to All filter
+                self.diagnostics_filter = DiagnosticFilter::All;
+                self.selected_diagnostic_index = 0; // Reset selection
+            },
+            KeyCode::Char('e') | KeyCode::Char('E') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Switch to Errors filter
+                self.diagnostics_filter = DiagnosticFilter::Errors;
+                self.selected_diagnostic_index = 0; // Reset selection
+            },
+            KeyCode::Char('w') | KeyCode::Char('W') => {
+                // Switch to Warnings filter
+                self.diagnostics_filter = DiagnosticFilter::Warnings;
+                self.selected_diagnostic_index = 0; // Reset selection
+            },
+            KeyCode::Char('i') | KeyCode::Char('I') => {
+                // Switch to Info filter
+                self.diagnostics_filter = DiagnosticFilter::Info;
+                self.selected_diagnostic_index = 0; // Reset selection
+            },
+            // Navigation keys
             KeyCode::Char('n') | KeyCode::Down | KeyCode::Char('j') => {
                 // Move to next diagnostic in the panel
-                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                let diagnostics = self.current_tab().diagnostics.get_filtered_diagnostics(&self.diagnostics_filter);
                 if !diagnostics.is_empty() {
                     self.selected_diagnostic_index = (self.selected_diagnostic_index + 1) % diagnostics.len();
                 }
             },
             KeyCode::Char('p') | KeyCode::Up | KeyCode::Char('k') => {
                 // Move to previous diagnostic in the panel
-                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                let diagnostics = self.current_tab().diagnostics.get_filtered_diagnostics(&self.diagnostics_filter);
                 if !diagnostics.is_empty() {
                     self.selected_diagnostic_index = if self.selected_diagnostic_index == 0 {
                         diagnostics.len() - 1
@@ -839,7 +879,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             },
             KeyCode::Enter => {
                 // Navigate to the selected diagnostic and switch back to normal mode
-                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                let diagnostics = self.current_tab().diagnostics.get_filtered_diagnostics(&self.diagnostics_filter);
                 
                 if !diagnostics.is_empty() && self.selected_diagnostic_index < diagnostics.len() {
                     // Get the selected diagnostic - clone the necessary fields to avoid borrow conflicts

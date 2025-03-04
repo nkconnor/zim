@@ -1308,20 +1308,48 @@ fn render_diagnostics_panel<B: Backend>(f: &mut Frame<B>, editor: &Editor, area:
         .title_style(Style::default().fg(Color::LightBlue))
         .borders(Borders::ALL);
     
+    // Determine which filter is active and style it appropriately
+    let (error_style, warning_style, info_style, all_style) = match editor.diagnostics_filter {
+        crate::editor::DiagnosticFilter::Errors => (
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+            Style::default()
+        ),
+        crate::editor::DiagnosticFilter::Warnings => (
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+            Style::default()
+        ),
+        crate::editor::DiagnosticFilter::Info => (
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC | Modifier::REVERSED),
+            Style::default()
+        ),
+        crate::editor::DiagnosticFilter::All => (
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+            Style::default().add_modifier(Modifier::REVERSED)
+        ),
+    };
+    
     // Show filter controls and keyboard shortcuts
     let filter_text = vec![
         Line::from(vec![
-            Span::styled("Errors: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw("E"),
+            Span::styled("Errors: ", error_style),
+            Span::styled("E", error_style),
             Span::styled(" | ", Style::default()),
-            Span::styled("Warnings: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw("W"),
+            Span::styled("Warnings: ", warning_style),
+            Span::styled("W", warning_style),
             Span::styled(" | ", Style::default()),
-            Span::styled("Info: ", Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)),
-            Span::raw("I"),
+            Span::styled("Info: ", info_style),
+            Span::styled("I", info_style),
             Span::styled(" | ", Style::default()),
-            Span::styled("All: ", Style::default()),
-            Span::raw("A"),
+            Span::styled("All: ", all_style),
+            Span::styled("A", all_style),
         ]),
         Line::from(vec![
             Span::styled("Navigation: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -1338,6 +1366,7 @@ fn render_diagnostics_panel<B: Backend>(f: &mut Frame<B>, editor: &Editor, area:
     // Render diagnostics list
     let tab = editor.current_tab();
     let all_diagnostics = tab.diagnostics.get_all_diagnostics();
+    let filtered_diagnostics = tab.diagnostics.get_filtered_diagnostics(&editor.diagnostics_filter);
     
     // Collect counts by severity
     let error_count = all_diagnostics.iter()
@@ -1351,18 +1380,29 @@ fn render_diagnostics_panel<B: Backend>(f: &mut Frame<B>, editor: &Editor, area:
         .count();
     
     // Create the diagnostics list block with counts
+    let filter_name = match editor.diagnostics_filter {
+        crate::editor::DiagnosticFilter::All => "All",
+        crate::editor::DiagnosticFilter::Errors => "Errors",
+        crate::editor::DiagnosticFilter::Warnings => "Warnings",
+        crate::editor::DiagnosticFilter::Info => "Info",
+    };
+    
     let list_block = Block::default()
-        .title(format!(" Issues ({} total - {} errors, {} warnings, {} info) ", 
-            all_diagnostics.len(), error_count, warning_count, info_count))
+        .title(format!(" Issues ({} total - {} errors, {} warnings, {} info) - Showing: {} ", 
+            all_diagnostics.len(), error_count, warning_count, info_count, filter_name))
         .title_style(Style::default().fg(Color::Green))
         .borders(Borders::ALL);
 
     let list_area = list_block.inner(main_layout[1]);
     f.render_widget(list_block, main_layout[1]);
 
-    if all_diagnostics.is_empty() {
+    if filtered_diagnostics.is_empty() {
         // Show a message when there are no diagnostics
-        let help_text = "No diagnostics found. Press Esc to return to normal mode.";
+        let help_text = if all_diagnostics.is_empty() {
+            "No diagnostics found. Press Esc to return to normal mode."
+        } else {
+            "No diagnostics match the current filter. Try changing the filter (E/W/I/A)."
+        };
         
         let help_paragraph = Paragraph::new(help_text)
             .style(Style::default().fg(Color::Gray))
@@ -1371,7 +1411,7 @@ fn render_diagnostics_panel<B: Backend>(f: &mut Frame<B>, editor: &Editor, area:
         f.render_widget(help_paragraph, list_area);
     } else {
         // Create list items from diagnostics
-        let items: Vec<ListItem> = all_diagnostics
+        let items: Vec<ListItem> = filtered_diagnostics
             .iter()
             .enumerate()
             .map(|(i, diagnostic)| {

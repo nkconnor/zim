@@ -150,6 +150,33 @@ impl DiagnosticCollection {
             .collect()
     }
     
+    /// Get all diagnostics filtered by severity
+    pub fn get_filtered_diagnostics(&self, filter: &crate::editor::DiagnosticFilter) -> Vec<&Diagnostic> {
+        match filter {
+            crate::editor::DiagnosticFilter::All => {
+                self.get_all_diagnostics()
+            },
+            crate::editor::DiagnosticFilter::Errors => {
+                self.get_all_diagnostics()
+                    .into_iter()
+                    .filter(|d| d.severity == DiagnosticSeverity::Error)
+                    .collect()
+            },
+            crate::editor::DiagnosticFilter::Warnings => {
+                self.get_all_diagnostics()
+                    .into_iter()
+                    .filter(|d| d.severity == DiagnosticSeverity::Warning)
+                    .collect()
+            },
+            crate::editor::DiagnosticFilter::Info => {
+                self.get_all_diagnostics()
+                    .into_iter()
+                    .filter(|d| d.severity == DiagnosticSeverity::Information)
+                    .collect()
+            },
+        }
+    }
+    
     /// Returns the number of errors in the collection
     pub fn error_count(&self) -> usize {
         self.get_all_diagnostics()
