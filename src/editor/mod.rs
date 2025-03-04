@@ -1317,7 +1317,30 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     "cancel" => self.mode = Mode::Normal,
                     "select" => {
                         if let Some(file_path) = self.file_finder.get_selected() {
-                            self.load_file(&file_path)?;
+                            // KEY FIX: Use load_file_in_new_tab to ensure clean state
+                            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                                // Load in a new tab if Ctrl is pressed
+                                self.load_file_in_new_tab(&file_path)?;
+                            } else {
+                                // Load in current tab, but make sure it's clean first
+                                let current_tab = self.current_tab;
+                                
+                                // Check if current tab is modified or has content
+                                let need_new_tab = {
+                                    let tab = &self.tabs[current_tab];
+                                    tab.buffer.is_modified || 
+                                        (!tab.buffer.lines.is_empty() && 
+                                         !(tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty()))
+                                };
+                                
+                                if need_new_tab {
+                                    // Create new tab for the file
+                                    self.load_file_in_new_tab(&file_path)?;
+                                } else {
+                                    // Use current tab
+                                    self.load_file(&file_path)?;
+                                }
+                            }
                             self.mode = Mode::Normal;
                         }
                     }
@@ -1335,7 +1358,30 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
                 if let Some(file_path) = self.file_finder.get_selected() {
-                    self.load_file(&file_path)?;
+                    // KEY FIX: Use load_file_in_new_tab to ensure clean state
+                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                        // Load in a new tab if Ctrl is pressed
+                        self.load_file_in_new_tab(&file_path)?;
+                    } else {
+                        // Load in current tab, but make sure it's clean first
+                        let current_tab = self.current_tab;
+                        
+                        // Check if current tab is modified or has content
+                        let need_new_tab = {
+                            let tab = &self.tabs[current_tab];
+                            tab.buffer.is_modified || 
+                                (!tab.buffer.lines.is_empty() && 
+                                 !(tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty()))
+                        };
+                        
+                        if need_new_tab {
+                            // Create new tab for the file
+                            self.load_file_in_new_tab(&file_path)?;
+                        } else {
+                            // Use current tab
+                            self.load_file(&file_path)?;
+                        }
+                    }
                     self.mode = Mode::Normal;
                 }
             }
@@ -1704,8 +1750,11 @@ mod tests {
         let config = Config::default();
         let mut editor = Editor::new_with_config(config);
         
-        // Start with a tab in normal mode
-        assert_eq!(editor.mode, Mode::Normal);
+        // The editor now starts in FileFinder mode by default
+        assert_eq!(editor.mode, Mode::FileFinder);
+        
+        // Switch to normal mode for the test
+        editor.mode = Mode::Normal;
         
         // Check that the buffer starts with no selection
         assert_eq!(editor.current_tab().buffer.selection_start, None);

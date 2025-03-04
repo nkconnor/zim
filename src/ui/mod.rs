@@ -1236,7 +1236,7 @@ fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     f.render_widget(file_list, main_layout[2]);
 
     // Add a small help text at the bottom of the file list area
-    let help_text = "Press Enter to select, Esc for normal mode, Ctrl+n for new file";
+    let help_text = "Enter: open in current tab, Ctrl+Enter: open in new tab, Esc: normal mode, Ctrl+n: new file";
     let help_paragraph = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
         .alignment(tui::layout::Alignment::Center);
