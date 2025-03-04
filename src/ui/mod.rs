@@ -43,7 +43,11 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) -> Option<ViewportU
         },
         Mode::WriteConfirm => {
             // In WriteConfirm mode, we still show the editor but highlight modified lines
-            viewport_update = render_editor_area_with_highlights(f, editor, chunks[1]);
+            viewport_update = render_editor_area_with_highlights(f, editor, chunks[1], false);
+        },
+        Mode::ReloadConfirm => {
+            // In ReloadConfirm mode, we show the editor with diff lines highlighted
+            viewport_update = render_editor_area_with_diff_highlights(f, editor, chunks[1]);
         },
         Mode::FilenamePrompt => {
             render_filename_prompt(f, editor, chunks[1]);
@@ -147,12 +151,13 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     f.render_widget(tabs_paragraph, inner_area);
 }
 
-// Common rendering function that can optionally highlight modified lines
+// Common rendering function that can optionally highlight modified or diff lines
 fn render_editor_area_inner<B: Backend>(
     f: &mut Frame<B>, 
     editor: &Editor, 
     area: Rect, 
-    highlight_modified: bool
+    highlight_modified: bool,
+    is_diff_mode: bool
 ) -> Option<ViewportUpdate> {
     // Get the current tab
     let tab = editor.current_tab();
@@ -191,10 +196,17 @@ fn render_editor_area_inner<B: Backend>(
             let line_number = start_line + idx + 1; // 1-indexed line numbers
             let current_line_idx = start_line + idx;
             let is_modified = tab.buffer.is_line_modified(current_line_idx);
+            let is_diff = editor.diff_lines.contains(&current_line_idx);
             
-            // Style the line number based on modification status if highlighting is enabled
-            let number_style = if highlight_modified && is_modified {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            // Style the line number based on modification/diff status if highlighting is enabled
+            let number_style = if highlight_modified {
+                if is_diff_mode && is_diff {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if !is_diff_mode && is_modified {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -213,81 +225,92 @@ fn render_editor_area_inner<B: Backend>(
                 "".to_string()
             };
             
-            // Choose whether to add diagnostic or modification highlighting
+            // Choose whether to add diagnostic, modification, or diff highlighting
             let current_line = start_line + idx;
             
-            if highlight_modified && is_modified {
-                // In WriteConfirm mode, highlight the entire modified line
-                spans.push(tui::text::Span::styled(
-                    content,
-                    Style::default().fg(Color::Green)
-                ));
-            } else if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
-                // If there are diagnostics, create styled spans based on the diagnostics
-                if !line_diagnostics.is_empty() && !content.is_empty() {
-                    let mut pos = 0;
-                    let mut content_spans = Vec::new();
+            if highlight_modified {
+                if is_diff_mode && is_diff {
+                    // In ReloadConfirm mode, highlight the entire diff line in yellow
+                    spans.push(tui::text::Span::styled(
+                        content,
+                        Style::default().fg(Color::Yellow)
+                    ));
+                } else if !is_diff_mode && is_modified {
+                    // In WriteConfirm mode, highlight the entire modified line in green
+                    spans.push(tui::text::Span::styled(
+                        content,
+                        Style::default().fg(Color::Green)
+                    ));
+                } else if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
+                    // If there are diagnostics, create styled spans based on the diagnostics
+                    if !line_diagnostics.is_empty() && !content.is_empty() {
+                        let mut pos = 0;
+                        let mut content_spans = Vec::new();
                     
-                    // Sort diagnostics by start_column
-                    let mut sorted_diags = line_diagnostics.clone();
-                    sorted_diags.sort_by_key(|d| d.span.start_column);
-                    
-                    for diag in sorted_diags {
-                        let start = diag.span.start_column.saturating_sub(left_column);
-                        let end = diag.span.end_column.saturating_sub(left_column);
+                        // Sort diagnostics by start_column
+                        let mut sorted_diags = line_diagnostics.clone();
+                        sorted_diags.sort_by_key(|d| d.span.start_column);
                         
-                        // Skip if the diagnostic is outside the visible range
-                        if start >= content.len() || end <= 0 {
-                            continue;
+                        for diag in sorted_diags {
+                            let start = diag.span.start_column.saturating_sub(left_column);
+                            let end = diag.span.end_column.saturating_sub(left_column);
+                            
+                            // Skip if the diagnostic is outside the visible range
+                            if start >= content.len() || end <= 0 {
+                                continue;
+                            }
+                            
+                            // Add text before the diagnostic
+                            if start > pos {
+                                let before_text = &content[pos..start];
+                                content_spans.push(tui::text::Span::raw(before_text.to_string()));
+                            }
+                            
+                            // Add the diagnostic with styling
+                            let diagnostic_style = match diag.severity {
+                                crate::editor::DiagnosticSeverity::Error => {
+                                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                },
+                                crate::editor::DiagnosticSeverity::Warning => {
+                                    Style::default().fg(Color::Yellow)
+                                },
+                                crate::editor::DiagnosticSeverity::Information => {
+                                    Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)
+                                },
+                                crate::editor::DiagnosticSeverity::Hint => {
+                                    Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC)
+                                },
+                            };
+                            
+                            let end_idx = std::cmp::min(end, content.len());
+                            if start < end_idx {
+                                let diagnostic_text = &content[start..end_idx];
+                                content_spans.push(tui::text::Span::styled(
+                                    diagnostic_text.to_string(),
+                                    diagnostic_style,
+                                ));
+                            }
+                            
+                            pos = end_idx;
                         }
                         
-                        // Add text before the diagnostic
-                        if start > pos {
-                            let before_text = &content[pos..start];
-                            content_spans.push(tui::text::Span::raw(before_text.to_string()));
+                        // Add remaining text after the last diagnostic
+                        if pos < content.len() {
+                            let after_text = &content[pos..];
+                            content_spans.push(tui::text::Span::raw(after_text.to_string()));
                         }
                         
-                        // Add the diagnostic with styling
-                        let diagnostic_style = match diag.severity {
-                            crate::editor::DiagnosticSeverity::Error => {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-                            },
-                            crate::editor::DiagnosticSeverity::Warning => {
-                                Style::default().fg(Color::Yellow)
-                            },
-                            crate::editor::DiagnosticSeverity::Information => {
-                                Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)
-                            },
-                            crate::editor::DiagnosticSeverity::Hint => {
-                                Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC)
-                            },
-                        };
-                        
-                        let end_idx = std::cmp::min(end, content.len());
-                        if start < end_idx {
-                            let diagnostic_text = &content[start..end_idx];
-                            content_spans.push(tui::text::Span::styled(
-                                diagnostic_text.to_string(),
-                                diagnostic_style,
-                            ));
-                        }
-                        
-                        pos = end_idx;
+                        // Add all spans to the line
+                        spans.extend(content_spans);
+                    } else {
+                        spans.push(tui::text::Span::raw(content));
                     }
-                    
-                    // Add remaining text after the last diagnostic
-                    if pos < content.len() {
-                        let after_text = &content[pos..];
-                        content_spans.push(tui::text::Span::raw(after_text.to_string()));
-                    }
-                    
-                    // Add all spans to the line
-                    spans.extend(content_spans);
                 } else {
+                    // No diagnostics, just add the raw content
                     spans.push(tui::text::Span::raw(content));
                 }
             } else {
-                // No diagnostics, just add the raw content
+                // No highlighting mode, just add the raw content
                 spans.push(tui::text::Span::raw(content));
             }
             
@@ -324,11 +347,15 @@ fn render_editor_area_inner<B: Backend>(
 }
 
 fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
-    render_editor_area_inner(f, editor, area, false)
+    render_editor_area_inner(f, editor, area, false, false)
 }
 
-fn render_editor_area_with_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
-    render_editor_area_inner(f, editor, area, true)
+fn render_editor_area_with_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect, is_reload_mode: bool) -> Option<ViewportUpdate> {
+    render_editor_area_inner(f, editor, area, true, is_reload_mode)
+}
+
+fn render_editor_area_with_diff_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+    render_editor_area_inner(f, editor, area, true, true)
 }
 
 fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
@@ -602,11 +629,11 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled("w", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Save current file (prompts for confirmation)")
+        tui::text::Span::raw("         - Save current file (prompts for confirmation, highlights changes)")
     ]));
     text.push(Line::from(vec![
-        tui::text::Span::styled("e", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Reload current file from disk")
+        tui::text::Span::styled("e", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        tui::text::Span::raw("         - Reload current file from disk (prompts with diff highlighting)")
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled("x", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
@@ -671,6 +698,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::FileFinder => "FILE FINDER".to_string(),
         Mode::Help => "HELP".to_string(),
         Mode::WriteConfirm => "WRITE? (y/n)".to_string(),
+        Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
         Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
     };
     
@@ -694,6 +722,20 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             
             format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel", 
                 mode_text, file_info, modified_line_count)
+        },
+        Mode::ReloadConfirm => {
+            // Get current file info for reload confirmation
+            let file_info = if let Some(path) = &editor.current_tab().buffer.file_path {
+                path.clone()
+            } else {
+                "No filename specified".to_string()
+            };
+            
+            // Count diff lines
+            let diff_line_count = editor.diff_lines.len();
+            
+            format!("{} | Reload file: {} | {} changed lines | Press Y to confirm, N to cancel", 
+                mode_text, file_info, diff_line_count)
         },
         _ => {
             // Get current tab info

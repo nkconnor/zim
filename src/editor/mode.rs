@@ -15,4 +15,6 @@ pub enum Mode {
     WriteConfirm,
     /// Filename prompt mode (for providing a filename when saving)
     FilenamePrompt,
+    /// Reload confirmation mode (for confirming file reload)
+    ReloadConfirm,
 }

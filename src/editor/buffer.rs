@@ -185,4 +185,51 @@ impl Buffer {
     pub fn get_modified_lines(&self) -> &HashSet<usize> {
         &self.modified_lines
     }
+    
+    /// Load file content for comparison without applying it to the buffer
+    pub fn load_file_for_diff(&self, path: &str) -> Result<Vec<String>> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path))?;
+        
+        let lines = content.lines().map(String::from).collect();
+        
+        Ok(lines)
+    }
+    
+    /// Find differences between current buffer and on-disk version
+    pub fn diff_with_disk(&self) -> Result<HashSet<usize>> {
+        // If no file path, can't diff
+        let path = match &self.file_path {
+            Some(p) => p,
+            None => return Ok(HashSet::new()),
+        };
+        
+        // Load the on-disk content
+        let on_disk_lines = self.load_file_for_diff(path)?;
+        
+        // Find differences
+        let mut diff_lines = HashSet::new();
+        
+        // The maximum length of the two line sets
+        let max_lines = self.lines.len().max(on_disk_lines.len());
+        
+        for i in 0..max_lines {
+            // Line exists in both buffer and on disk
+            if i < self.lines.len() && i < on_disk_lines.len() {
+                if self.lines[i] != on_disk_lines[i] {
+                    diff_lines.insert(i);
+                }
+            } 
+            // Line exists in buffer but not on disk
+            else if i < self.lines.len() {
+                diff_lines.insert(i);
+            }
+            // Line exists on disk but not in buffer
+            else if i < on_disk_lines.len() {
+                diff_lines.insert(i);
+            }
+        }
+        
+        Ok(diff_lines)
+    }
 }

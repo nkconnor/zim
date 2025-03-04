@@ -15,6 +15,7 @@ pub use diagnostics::{DiagnosticSeverity, DiagnosticCollection};
 use anyhow::Result;
 use crossterm::event::KeyEvent;
 use crate::config::Config;
+use std::collections::HashSet;
 
 /// Represents an editor tab with its own buffer, cursor, and viewport
 pub struct Tab {
@@ -54,6 +55,7 @@ pub struct Editor {
     pub save_and_quit: bool,
     pub command_text: String,
     pub filename_prompt_text: String,
+    pub diff_lines: HashSet<usize>,
 }
 
 impl Editor {
@@ -76,6 +78,7 @@ impl Editor {
             save_and_quit: false,
             command_text: String::new(),
             filename_prompt_text: String::new(),
+            diff_lines: HashSet::new(),
         }
     }
     
@@ -223,6 +226,7 @@ impl Editor {
             Mode::Help => self.handle_help_mode(key),
             Mode::WriteConfirm => self.handle_write_confirm_mode(key),
             Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
+            Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
         }
     }
     
@@ -327,6 +331,36 @@ impl Editor {
                 self.filename_prompt_text.pop();
             },
             _ => {}
+        }
+        
+        Ok(true)
+    }
+    
+    fn handle_reload_confirm_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                // User confirmed reload
+                if let Some(path) = &self.current_tab().buffer.file_path.clone() {
+                    if !path.starts_with("untitled-") {
+                        // Actually reload the file
+                        if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
+                            eprintln!("Error reloading file: {}", e);
+                        }
+                    }
+                }
+                
+                // Clear diff lines and return to normal mode
+                self.diff_lines.clear();
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                // User cancelled reload
+                self.diff_lines.clear();
+                self.mode = Mode::Normal;
+            },
+            _ => {} // Ignore other keys
         }
         
         Ok(true)
@@ -550,8 +584,22 @@ impl Editor {
             KeyCode::Char('e') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
                 if let Some(path) = &self.current_tab().buffer.file_path.clone() {
                     if !path.starts_with("untitled-") {
-                        if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
-                            eprintln!("Error reloading file: {}", e);
+                        // Calculate diff between buffer and disk
+                        match self.current_tab().buffer.diff_with_disk() {
+                            Ok(diff) => {
+                                if !diff.is_empty() {
+                                    // Store diff lines for highlighting
+                                    self.diff_lines = diff;
+                                    // Enter reload confirmation mode
+                                    self.mode = Mode::ReloadConfirm;
+                                } else {
+                                    // No differences, no need to reload
+                                    eprintln!("File unchanged on disk");
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("Error comparing with disk: {}", e);
+                            }
                         }
                     }
                 }
@@ -1165,6 +1213,61 @@ mod tests {
         // Verify the buffer is no longer marked as modified
         assert!(!editor.current_tab().buffer.is_modified);
         assert_eq!(editor.current_tab().buffer.get_modified_lines().len(), 0);
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_reload_file_flow() -> Result<()> {
+        // Create a temporary directory for test files
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test_reload.txt");
+        let file_path_str = file_path.to_str().unwrap();
+        
+        // Create initial file content on disk
+        std::fs::write(&file_path, "Initial content")?;
+        
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Load the initial file content
+        editor.current_tab_mut().buffer.file_path = Some(file_path_str.to_string());
+        editor.current_tab_mut().buffer.load_file(file_path_str)?;
+        
+        // Verify the initial content is loaded
+        assert_eq!(editor.current_tab().buffer.get_content(), "Initial content");
+        
+        // Make a change to the buffer
+        let mut cursor = Cursor::new();
+        cursor.x = 8; // After "Initial "
+        editor.current_tab_mut().buffer.insert_char_at_cursor('X', &cursor);
+        
+        // Verify buffer is modified
+        assert!(editor.current_tab().buffer.is_modified);
+        
+        // Change the file on disk
+        std::fs::write(&file_path, "Changed on disk")?;
+        
+        // Calculate diff between buffer and disk
+        let diff = editor.current_tab().buffer.diff_with_disk()?;
+        assert!(!diff.is_empty());
+        
+        // Set up reload confirm mode
+        editor.diff_lines = diff;
+        editor.mode = Mode::ReloadConfirm;
+        
+        // Confirm reload
+        let y_key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        let _ = editor.handle_reload_confirm_mode(y_key);
+        
+        // Verify the buffer was reloaded with disk content
+        assert_eq!(editor.current_tab().buffer.get_content(), "Changed on disk");
+        
+        // Verify we're back in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
+        
+        // Verify diff lines were cleared
+        assert!(editor.diff_lines.is_empty());
         
         Ok(())
     }
