@@ -104,8 +104,15 @@ impl Buffer {
                 for line_idx in first_line..=last_line {
                     if line_idx < self.lines.len() {
                         result.push_str(&self.lines[line_idx]);
+                        // Always add a newline after each line in VisualLine mode
                         result.push('\n');
                     }
+                }
+                
+                // Ensure the result always ends with a newline in VisualLine mode
+                // (This guarantees proper line-based pasting behavior)
+                if !result.ends_with('\n') {
+                    result.push('\n');
                 }
                 
                 return result;
@@ -118,7 +125,13 @@ impl Buffer {
                     let end_col = min(last_col, line.len());
                     let start_col = min(first_col, line.len());
                     if start_col <= end_col && start_col < line.len() {
-                        return line[start_col..end_col].to_string();
+                        // If the selection extends to the end of the line and it's not the last line,
+                        // include the newline character to maintain proper line breaks when pasting
+                        let content = line[start_col..end_col].to_string();
+                        if end_col >= line.len() && first_line < self.lines.len() - 1 {
+                            return format!("{}\n", content);
+                        }
+                        return content;
                     }
                 }
                 return String::new();
@@ -151,6 +164,12 @@ impl Buffer {
                 let end_col = min(last_col, line.len());
                 if end_col > 0 {
                     result.push_str(&line[..end_col]);
+                }
+                
+                // Include a final newline if the selection extends to the end of line
+                // and it's not the very last line of the buffer
+                if end_col >= line.len() && last_line < self.lines.len() - 1 {
+                    result.push('\n');
                 }
             }
             
