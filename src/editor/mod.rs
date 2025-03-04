@@ -345,9 +345,8 @@ impl Editor {
                 if let Some(path) = &self.current_tab().buffer.file_path.clone() {
                     if !path.starts_with("untitled-") {
                         // Actually reload the file
-                        if let Err(e) = self.current_tab_mut().buffer.load_file(path) {
-                            eprintln!("Error reloading file: {}", e);
-                        }
+                        // Simply attempt to reload the file
+                        let _ = self.current_tab_mut().buffer.load_file(path);
                     }
                 }
                 
@@ -360,7 +359,9 @@ impl Editor {
                 self.diff_lines.clear();
                 self.mode = Mode::Normal;
             },
-            _ => {} // Ignore other keys
+            _ => {
+                // Ignore other keys in reload confirm mode
+            }
         }
         
         Ok(true)
@@ -587,18 +588,22 @@ impl Editor {
                         // Calculate diff between buffer and disk
                         match self.current_tab().buffer.diff_with_disk() {
                             Ok(diff) => {
+                                // Check if we found any differences
+                                
                                 if !diff.is_empty() {
                                     // Store diff lines for highlighting
                                     self.diff_lines = diff;
                                     // Enter reload confirmation mode
                                     self.mode = Mode::ReloadConfirm;
+                                    
+                                            // Enter reload confirm mode
                                 } else {
                                     // No differences, no need to reload
-                                    eprintln!("File unchanged on disk");
+                                    // Silent mode - no message needed
                                 }
                             },
-                            Err(e) => {
-                                eprintln!("Error comparing with disk: {}", e);
+                            Err(_) => {
+                                // Silent error handling - no UI output
                             }
                         }
                     }
@@ -1219,11 +1224,13 @@ mod tests {
     
     #[test]
     fn test_reload_file_flow() -> Result<()> {
+        println!("Starting reload file flow test");
         // Create a temporary directory for test files
         let dir = tempdir()?;
         let file_path = dir.path().join("test_reload.txt");
         let file_path_str = file_path.to_str().unwrap();
         
+        println!("Creating test file at: {}", file_path_str);
         // Create initial file content on disk
         std::fs::write(&file_path, "Initial content")?;
         
@@ -1231,37 +1238,55 @@ mod tests {
         let mut editor = Editor::new_with_config(config);
         
         // Load the initial file content
+        println!("Loading initial file content");
         editor.current_tab_mut().buffer.file_path = Some(file_path_str.to_string());
         editor.current_tab_mut().buffer.load_file(file_path_str)?;
         
         // Verify the initial content is loaded
-        assert_eq!(editor.current_tab().buffer.get_content(), "Initial content");
+        let content = editor.current_tab().buffer.get_content();
+        println!("Initial content loaded: '{}'", content);
+        assert_eq!(content, "Initial content");
         
         // Make a change to the buffer
+        println!("Making change to buffer");
         let mut cursor = Cursor::new();
         cursor.x = 8; // After "Initial "
         editor.current_tab_mut().buffer.insert_char_at_cursor('X', &cursor);
         
         // Verify buffer is modified
+        let modified_content = editor.current_tab().buffer.get_content();
+        println!("Modified content: '{}'", modified_content);
         assert!(editor.current_tab().buffer.is_modified);
+        assert_eq!(modified_content, "Initial Xcontent");
         
         // Change the file on disk
+        println!("Changing file on disk");
         std::fs::write(&file_path, "Changed on disk")?;
         
+        // Verify file content changed
+        let disk_content = std::fs::read_to_string(&file_path)?;
+        println!("Disk content: '{}'", disk_content);
+        
         // Calculate diff between buffer and disk
+        println!("Calculating diff");
         let diff = editor.current_tab().buffer.diff_with_disk()?;
+        println!("Diff lines: {:?}", diff);
         assert!(!diff.is_empty());
         
         // Set up reload confirm mode
+        println!("Setting up reload confirm mode");
         editor.diff_lines = diff;
         editor.mode = Mode::ReloadConfirm;
         
         // Confirm reload
+        println!("Confirming reload");
         let y_key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
         let _ = editor.handle_reload_confirm_mode(y_key);
         
         // Verify the buffer was reloaded with disk content
-        assert_eq!(editor.current_tab().buffer.get_content(), "Changed on disk");
+        let final_content = editor.current_tab().buffer.get_content();
+        println!("Final content: '{}'", final_content);
+        assert_eq!(final_content, "Changed on disk");
         
         // Verify we're back in normal mode
         assert_eq!(editor.mode, Mode::Normal);
@@ -1269,6 +1294,7 @@ mod tests {
         // Verify diff lines were cleared
         assert!(editor.diff_lines.is_empty());
         
+        println!("Test completed successfully");
         Ok(())
     }
 }

@@ -228,6 +228,8 @@ fn render_editor_area_inner<B: Backend>(
             // Choose whether to add diagnostic, modification, or diff highlighting
             let current_line = start_line + idx;
             
+            // Line content is now ready to display with appropriate styling
+            
             if highlight_modified {
                 if is_diff_mode && is_diff {
                     // In ReloadConfirm mode, highlight the entire diff line in yellow

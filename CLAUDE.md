@@ -7,6 +7,7 @@
 - When making changes, use existing patterns and conventions
 - Keep the editor's functionality following vim-like keybindings
 - Ensure functionality is tested with cargo test
+- IMPORTANT: NEVER use `cargo run` directly, this can cause errors
 
 ## Common Commands
 
@@ -19,8 +20,8 @@ cargo build
 # Run tests
 cargo test
 
-# Build and run
-cargo run
+# Build and run - DO NOT USE
+# cargo run
 ```
 
 ## Code Structure
