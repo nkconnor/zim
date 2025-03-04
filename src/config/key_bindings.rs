@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeyBinding {
@@ -90,31 +90,58 @@ impl Default for KeyBindings {
         normal_mode.insert("move_down".to_string(), KeyBinding::new("j"));
         normal_mode.insert("move_up".to_string(), KeyBinding::new("k"));
         normal_mode.insert("move_right".to_string(), KeyBinding::new("l"));
-        normal_mode.insert("find_file".to_string(), KeyBinding::new("p").with_modifier("ctrl"));
-        
+        normal_mode.insert(
+            "find_file".to_string(),
+            KeyBinding::new("p").with_modifier("ctrl"),
+        );
+
         // Line navigation
         normal_mode.insert("move_to_line_start".to_string(), KeyBinding::new("^"));
         normal_mode.insert("move_to_line_end".to_string(), KeyBinding::new("$"));
-        
+
         // File navigation - using simple keys for now
         normal_mode.insert("move_to_file_start".to_string(), KeyBinding::new("g"));
         normal_mode.insert("move_to_file_end".to_string(), KeyBinding::new("G"));
-        
+
         // Page navigation
-        normal_mode.insert("page_up".to_string(), KeyBinding::new("b").with_modifier("ctrl"));
-        normal_mode.insert("page_down".to_string(), KeyBinding::new("f").with_modifier("ctrl"));
-        
+        normal_mode.insert(
+            "page_up".to_string(),
+            KeyBinding::new("b").with_modifier("ctrl"),
+        );
+        normal_mode.insert(
+            "page_down".to_string(),
+            KeyBinding::new("f").with_modifier("ctrl"),
+        );
+
         // Diagnostics
-        normal_mode.insert("run_cargo_check".to_string(), KeyBinding::new("d").with_modifier("ctrl"));
-        normal_mode.insert("run_cargo_clippy".to_string(), KeyBinding::new("y").with_modifier("ctrl"));
-        
+        normal_mode.insert(
+            "run_cargo_check".to_string(),
+            KeyBinding::new("d").with_modifier("ctrl"),
+        );
+        normal_mode.insert(
+            "run_cargo_clippy".to_string(),
+            KeyBinding::new("y").with_modifier("ctrl"),
+        );
+
         // Tab management
-        normal_mode.insert("new_tab".to_string(), KeyBinding::new("n").with_modifier("ctrl"));
-        normal_mode.insert("close_tab".to_string(), KeyBinding::new("w").with_modifier("ctrl"));
+        normal_mode.insert(
+            "new_tab".to_string(),
+            KeyBinding::new("n").with_modifier("ctrl"),
+        );
+        normal_mode.insert(
+            "close_tab".to_string(),
+            KeyBinding::new("w").with_modifier("ctrl"),
+        );
         // Use only the key combinations that are confirmed to work reliably
-        normal_mode.insert("next_tab".to_string(), KeyBinding::new("right").with_modifier("ctrl"));
-        normal_mode.insert("prev_tab".to_string(), KeyBinding::new("left").with_modifier("ctrl"));
-        
+        normal_mode.insert(
+            "next_tab".to_string(),
+            KeyBinding::new("right").with_modifier("ctrl"),
+        );
+        normal_mode.insert(
+            "prev_tab".to_string(),
+            KeyBinding::new("left").with_modifier("ctrl"),
+        );
+
         // F-key navigation for tabs (1-12)
         normal_mode.insert("goto_tab_1".to_string(), KeyBinding::new("f1"));
         normal_mode.insert("goto_tab_2".to_string(), KeyBinding::new("f2"));
@@ -128,16 +155,19 @@ impl Default for KeyBindings {
         normal_mode.insert("goto_tab_10".to_string(), KeyBinding::new("f10"));
         normal_mode.insert("goto_tab_11".to_string(), KeyBinding::new("f11"));
         normal_mode.insert("goto_tab_12".to_string(), KeyBinding::new("f12"));
-        
+
         // Help
-        normal_mode.insert("show_help".to_string(), KeyBinding::new("h").with_modifier("ctrl"));
-        
+        normal_mode.insert(
+            "show_help".to_string(),
+            KeyBinding::new("h").with_modifier("ctrl"),
+        );
+
         let mut insert_mode = HashMap::new();
         insert_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
 
         let mut command_mode = HashMap::new();
         command_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
-        
+
         let mut help_mode = HashMap::new();
         help_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
 
@@ -161,7 +191,7 @@ pub fn get_config_dir() -> Result<PathBuf> {
     let config_dir = dirs::config_dir()
         .with_context(|| "Failed to determine config directory")?
         .join("zim");
-    
+
     Ok(config_dir)
 }
 
@@ -171,28 +201,31 @@ impl KeyBindings {
         let bindings_path = config_dir.join("key_bindings.toml");
 
         if bindings_path.exists() {
-            let bindings_str = fs::read_to_string(&bindings_path)
-                .with_context(|| format!("Failed to read key bindings file: {:?}", bindings_path))?;
-            
-            let bindings = toml::from_str(&bindings_str)
-                .with_context(|| format!("Failed to parse key bindings file: {:?}", bindings_path))?;
-            
+            let bindings_str = fs::read_to_string(&bindings_path).with_context(|| {
+                format!("Failed to read key bindings file: {:?}", bindings_path)
+            })?;
+
+            let bindings = toml::from_str(&bindings_str).with_context(|| {
+                format!("Failed to parse key bindings file: {:?}", bindings_path)
+            })?;
+
             Ok(bindings)
         } else {
             // Create default bindings
             let bindings = KeyBindings::default();
-            
+
             // Ensure config directory exists
             fs::create_dir_all(&config_dir)
                 .with_context(|| format!("Failed to create config directory: {:?}", config_dir))?;
-            
+
             // Write default bindings
             let bindings_str = toml::to_string_pretty(&bindings)
                 .with_context(|| "Failed to serialize key bindings")?;
-            
-            fs::write(&bindings_path, bindings_str)
-                .with_context(|| format!("Failed to write key bindings file: {:?}", bindings_path))?;
-            
+
+            fs::write(&bindings_path, bindings_str).with_context(|| {
+                format!("Failed to write key bindings file: {:?}", bindings_path)
+            })?;
+
             Ok(bindings)
         }
     }
@@ -204,14 +237,14 @@ impl KeyBindings {
         // Ensure config directory exists
         fs::create_dir_all(&config_dir)
             .with_context(|| format!("Failed to create config directory: {:?}", config_dir))?;
-        
+
         // Write bindings
-        let bindings_str = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize key bindings")?;
-        
+        let bindings_str =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize key bindings")?;
+
         fs::write(&bindings_path, bindings_str)
             .with_context(|| format!("Failed to write key bindings file: {:?}", bindings_path))?;
-        
+
         Ok(())
     }
 }
@@ -225,24 +258,24 @@ mod tests {
     fn test_key_binding_matches() {
         // Test Ctrl+n for new tab
         let binding = KeyBinding::new("n").with_modifier("ctrl");
-        
+
         // Should match Ctrl+n
         let ctrl_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
         assert!(binding.matches(&ctrl_n));
-        
+
         // Should not match Alt+n
         let alt_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT);
         assert!(!binding.matches(&alt_n));
-        
+
         // Should not match just n
         let just_n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE);
         assert!(!binding.matches(&just_n));
     }
-    
+
     #[test]
     fn test_default_key_bindings() {
         let bindings = KeyBindings::default();
-        
+
         // Verify our new tab binding uses Ctrl+n
         if let Some(new_tab_binding) = bindings.normal_mode.get("new_tab") {
             assert_eq!(new_tab_binding.key, "n");

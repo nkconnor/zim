@@ -9,15 +9,18 @@ use tui::{
 
 use crate::editor::{Editor, Mode};
 
+// Command text for displaying in the UI
+pub static mut COMMAND_TEXT: String = String::new();
+
 pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
     let size = f.size();
 
-    // Create the layout with tab bar
+    // Create the layout with tab bar (increased height)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3), // Tab bar - increased height for visibility
+            Constraint::Length(3), // Tab bar - increased for visibility
             Constraint::Min(1),    // Editor area
             Constraint::Length(1)  // Status line
         ].as_ref())
@@ -45,7 +48,7 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
 
 /// Render the tab bar
 fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
-    // Make the tab bar more visible with a bright title and yellow border
+    // Create the tab bar block with prominent coloring
     let tab_bar_block = Block::default()
         .title(" TABS ")
         .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
@@ -58,13 +61,11 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create tab items
     let mut tab_spans = Vec::new();
     
-    // Debug - always show at least one tab
-    if editor.tabs.is_empty() {
-        tab_spans.push(tui::text::Span::styled(
-            " F1 untitled ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ));
-    }
+    // Always show debug info to confirm tabs are rendering
+    tab_spans.push(tui::text::Span::styled(
+        format!(" [{}] ", editor.tabs.len()),
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+    ));
     
     for (idx, tab) in editor.tabs.iter().enumerate() {
         // Get filename for tab or show untitled
@@ -121,26 +122,16 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
     
-    // Create tab line - add debug count so we always see something
-    let debug_count = format!(" [DEBUG: {} tabs] ", editor.tabs.len());
-    tab_spans.push(tui::text::Span::styled(debug_count, Style::default().fg(Color::Red)));
-    
+    // Create tab line
     let tabs_line = Line::from(tab_spans);
     
-    // Create a distinct paragraph with visible background color
+    // Create the paragraph for tabs display
     let tabs_paragraph = Paragraph::new(vec![tabs_line])
         .alignment(tui::layout::Alignment::Left)
         .style(Style::default().bg(Color::Black));
     
-    // Make sure we have enough space to render
-    if inner_area.width > 1 && inner_area.height > 0 {
-        f.render_widget(tabs_paragraph, inner_area);
-    } else {
-        // Area is too small - this helps diagnose layout issues
-        let debug_para = Paragraph::new("AREA TOO SMALL")
-            .style(Style::default().fg(Color::Red));
-        f.render_widget(debug_para, area);
-    }
+    // Render the tabs
+    f.render_widget(tabs_paragraph, inner_area);
 }
 
 fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
@@ -379,8 +370,20 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     // Title section
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "ZIM EDITOR KEYBOARD SHORTCUTS",
+            "╔══════════════════════════════════════╗",
+            Style::default().fg(Color::Yellow)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "║       ZIM EDITOR HELP GUIDE          ║",
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "╚══════════════════════════════════════╝",
+            Style::default().fg(Color::Yellow)
         )
     ]));
     text.push(Line::from(""));
@@ -388,15 +391,27 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     // Normal Mode section
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "NORMAL MODE",
+            "┏━━━━━━━━━━━━━━━━━━━━━┓",
+            Style::default().fg(Color::Green)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┃     NORMAL MODE     ┃",
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┗━━━━━━━━━━━━━━━━━━━━━┛",
+            Style::default().fg(Color::Green)
         )
     ]));
     text.push(Line::from(""));
     
     // Basic navigation
     text.push(Line::from(vec![
-        tui::text::Span::styled("Basic Navigation:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Basic Navigation:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("h, j, k, l - Move left, down, up, right"));
     text.push(Line::from("^ - Move to start of line"));
@@ -409,7 +424,7 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     
     // Modes
     text.push(Line::from(vec![
-        tui::text::Span::styled("Mode Switching:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Mode Switching:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("i - Enter Insert mode"));
     text.push(Line::from(": - Enter Command mode"));
@@ -418,7 +433,7 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     
     // Tabs
     text.push(Line::from(vec![
-        tui::text::Span::styled("Tab Management:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Tab Management:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("Ctrl+n - New tab"));
     text.push(Line::from("Ctrl+w - Close tab"));
@@ -429,15 +444,42 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     
     // File operations
     text.push(Line::from(vec![
-        tui::text::Span::styled("File Operations:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ File Operations:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("Ctrl+p - Find file"));
     text.push(Line::from("q - Quit (in normal mode)"));
     text.push(Line::from(""));
     
+    // Command mode
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            Style::default().fg(Color::Cyan)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┃     COMMAND MODE (Type : to enter)     ┃",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            Style::default().fg(Color::Cyan)
+        )
+    ]));
+    text.push(Line::from("w            - Save current file"));
+    text.push(Line::from("w filename   - Save to a new filename"));
+    text.push(Line::from("wq           - Save and quit"));
+    text.push(Line::from("wq filename  - Save to a new filename and quit"));
+    text.push(Line::from("q            - Quit"));
+    text.push(Line::from("q!           - Force quit (discard changes)"));
+    text.push(Line::from(""));
+    
     // Cargo integration
     text.push(Line::from(vec![
-        tui::text::Span::styled("Cargo Integration:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Cargo Integration:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("Ctrl+d - Run cargo check"));
     text.push(Line::from("Ctrl+y - Run cargo clippy"));
@@ -445,12 +487,27 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     
     // Help
     text.push(Line::from(vec![
-        tui::text::Span::styled("Help:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Help:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("Ctrl+h - Show this help page"));
     text.push(Line::from("ESC or q - Exit help and return to normal mode"));
     
     // Render the help text
+    // Add footer
+    text.push(Line::from(""));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "════════════════════════════════════════",
+            Style::default().fg(Color::Yellow)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "   Zim: A modern, fast text editor      ",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC)
+        )
+    ]));
+    
     let help_text = Paragraph::new(text)
         .alignment(tui::layout::Alignment::Left)
         .scroll((0, 0));
@@ -459,12 +516,16 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
 }
 
 fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Mode text with command text if in command mode
     let mode_text = match editor.mode {
-        Mode::Normal => "NORMAL",
-        Mode::Insert => "INSERT",
-        Mode::Command => "COMMAND",
-        Mode::FileFinder => "FILE FINDER",
-        Mode::Help => "HELP",
+        Mode::Normal => "NORMAL".to_string(),
+        Mode::Insert => "INSERT".to_string(),
+        Mode::Command => {
+            let cmd = unsafe { COMMAND_TEXT.clone() };
+            format!(":{}", cmd)
+        },
+        Mode::FileFinder => "FILE FINDER".to_string(),
+        Mode::Help => "HELP".to_string(),
     };
     
     let status = match editor.mode {

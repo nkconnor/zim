@@ -121,4 +121,37 @@ impl Buffer {
         
         Ok(())
     }
+    
+    /// Save the buffer content to a file
+    pub fn save(&self, path: Option<&str>) -> Result<String> {
+        use std::fs;
+        use std::path::Path;
+        
+        let file_path = match path {
+            // Use provided path if given
+            Some(p) => p.to_string(),
+            // Otherwise use existing path or error
+            None => match &self.file_path {
+                Some(p) => p.clone(),
+                None => return Err(anyhow::anyhow!("No file path specified")),
+            },
+        };
+        
+        // Get content and write to file
+        let content = self.get_content();
+        fs::write(&file_path, content)?;
+        
+        // Update file path if it was newly set
+        if path.is_some() {
+            // Use unsafe to get mutable reference to self
+            // This is safe because we're just updating the path
+            unsafe {
+                let this = self as *const Buffer as *mut Buffer;
+                (*this).file_path = Some(file_path.clone());
+            }
+        }
+        
+        // Return the path that was saved to
+        Ok(file_path)
+    }
 }

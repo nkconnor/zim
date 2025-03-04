@@ -15,6 +15,7 @@ pub use diagnostics::{DiagnosticSeverity, DiagnosticCollection};
 use anyhow::Result;
 use crossterm::event::KeyEvent;
 use crate::config::Config;
+use crate::ui;
 
 /// Represents an editor tab with its own buffer, cursor, and viewport
 pub struct Tab {
@@ -582,12 +583,23 @@ impl Editor {
 
     fn handle_command_mode(&mut self, key: KeyEvent) -> Result<bool> {
         let bindings = &self.config.key_bindings.command_mode;
-
+        
+        // Track the command text (accessible from UI)
+        static mut COMMAND_TEXT: String = String::new();
+        // Update UI's copy of the command text
+        unsafe { ui::COMMAND_TEXT = COMMAND_TEXT.clone(); }
+        
         // Check bindings first
         for (command, binding) in bindings {
             if binding.matches(&key) {
                 match command.as_str() {
-                    "normal_mode" => self.mode = Mode::Normal,
+                    "normal_mode" => {
+                        unsafe { 
+                            COMMAND_TEXT.clear(); 
+                            ui::COMMAND_TEXT = COMMAND_TEXT.clone();
+                        }
+                        self.mode = Mode::Normal;
+                    },
                     _ => {}
                 }
                 return Ok(true);
@@ -597,7 +609,98 @@ impl Editor {
         // Default handling
         use crossterm::event::KeyCode;
         match key.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Esc => {
+                unsafe { 
+                    COMMAND_TEXT.clear(); 
+                    ui::COMMAND_TEXT = COMMAND_TEXT.clone();
+                }
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Char(c) => {
+                unsafe { 
+                    COMMAND_TEXT.push(c); 
+                    ui::COMMAND_TEXT = COMMAND_TEXT.clone();
+                }
+            },
+            KeyCode::Backspace => {
+                unsafe { 
+                    COMMAND_TEXT.pop(); 
+                    ui::COMMAND_TEXT = COMMAND_TEXT.clone();
+                }
+            },
+            KeyCode::Enter => {
+                // Process the command
+                unsafe {
+                    let cmd = COMMAND_TEXT.clone();
+                    COMMAND_TEXT.clear();
+                    
+                    // Process the command (currently only support w and wq)
+                    if cmd == "w" {
+                        // Write file
+                        if let Some(path) = &self.current_tab().buffer.file_path {
+                            if path.starts_with("untitled-") {
+                                // Need a real filename
+                                // For now, just show an error in status line
+                                // TODO: Add proper status messages
+                                println!("Error: No filename specified. Use :w filename");
+                            } else {
+                                if let Err(e) = self.current_tab_mut().buffer.save(None) {
+                                    println!("Error saving file: {}", e);
+                                }
+                            }
+                        } else {
+                            println!("Error: No filename specified. Use :w filename");
+                        }
+                    } else if cmd.starts_with("w ") {
+                        // Write to specified file
+                        let filename = cmd[2..].trim();
+                        if !filename.is_empty() {
+                            if let Err(e) = self.current_tab_mut().buffer.save(Some(filename)) {
+                                println!("Error saving file: {}", e);
+                            }
+                        } else {
+                            println!("Error: No filename specified");
+                        }
+                    } else if cmd == "wq" {
+                        // Write and quit
+                        if let Some(path) = &self.current_tab().buffer.file_path {
+                            if path.starts_with("untitled-") {
+                                // Need a real filename
+                                println!("Error: No filename specified. Use :wq filename");
+                            } else {
+                                if let Err(e) = self.current_tab_mut().buffer.save(None) {
+                                    println!("Error saving file: {}", e);
+                                } else {
+                                    return Ok(false); // Exit
+                                }
+                            }
+                        } else {
+                            println!("Error: No filename specified. Use :wq filename");
+                        }
+                    } else if cmd.starts_with("wq ") {
+                        // Write to file and quit
+                        let filename = cmd[3..].trim();
+                        if !filename.is_empty() {
+                            if let Err(e) = self.current_tab_mut().buffer.save(Some(filename)) {
+                                println!("Error saving file: {}", e);
+                            } else {
+                                return Ok(false); // Exit
+                            }
+                        } else {
+                            println!("Error: No filename specified");
+                        }
+                    } else if cmd == "q" {
+                        // Quit
+                        return Ok(false);
+                    } else if cmd == "q!" {
+                        // Force quit
+                        return Ok(false);
+                    }
+                }
+                
+                // Return to normal mode
+                self.mode = Mode::Normal;
+            },
             _ => {}
         }
 
