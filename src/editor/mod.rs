@@ -387,6 +387,11 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 self.mode = Mode::Normal;
                 Ok(true)
             },
+            KeyCode::Char('q') => {
+                // User wants to quit without saving
+                self.save_and_quit = false;
+                return Ok(false); // Exit the editor
+            },
             _ => Ok(true), // Ignore other keys in write confirm mode
         }
     }
@@ -715,10 +720,37 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     }
                 }
             },
-            // Add explicit handling for x (save and quit)
-            KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+            // Add explicit handling for X (save and quit) - capital X to avoid conflict with x
+            KeyCode::Char('X') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                 self.save_and_quit = true;
                 self.mode = Mode::WriteConfirm;
+            },
+            // Add handling for d (delete line)
+            KeyCode::Char('d') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let cursor_y = self.current_tab().cursor.y;
+                self.current_tab_mut().buffer.delete_line(cursor_y);
+                
+                // Adjust cursor if needed
+                let tab = self.current_tab_mut();
+                if tab.cursor.y >= tab.buffer.line_count() {
+                    tab.cursor.y = tab.buffer.line_count().saturating_sub(1);
+                }
+                // Reset x position
+                let line_len = tab.buffer.line_length(tab.cursor.y);
+                if tab.cursor.x > line_len {
+                    tab.cursor.x = line_len.saturating_sub(1).max(0);
+                }
+                
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+            },
+            // Add handling for x (delete character and enter insert mode) - to mirror vim
+            KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let tab = self.current_tab_mut();
+                tab.buffer.delete_char_at_cursor(&tab.cursor);
+                self.mode = Mode::Insert;
+                self.update_viewport();
+                self.invalidate_highlight_cache();
             },
             KeyCode::Char('h') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let tab = self.current_tab_mut();
@@ -878,10 +910,29 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Backspace => {
                 let tab = self.current_tab_mut();
                 if tab.cursor.x > 0 {
+                    // Regular backspace - delete character before cursor
                     tab.cursor.move_left(&tab.buffer);
                     tab.buffer.delete_char_at_cursor(&tab.cursor);
                     self.update_viewport();
                     // Invalidate syntax highlighting cache for the modified line
+                    self.invalidate_highlight_cache();
+                } else if tab.cursor.y > 0 {
+                    // Cursor is at the beginning of a line
+                    // Remember the current line's content
+                    let current_line_content = tab.buffer.get_line(tab.cursor.y).to_string();
+                    
+                    // Move cursor to end of previous line
+                    let prev_line_len = tab.buffer.line_length(tab.cursor.y - 1);
+                    tab.cursor.y -= 1;
+                    tab.cursor.x = prev_line_len;
+                    
+                    // Join the lines
+                    tab.buffer.join_line(tab.cursor.y);
+                    
+                    // Update viewport for new cursor position
+                    self.update_viewport();
+                    
+                    // Invalidate syntax highlighting cache
                     self.invalidate_highlight_cache();
                 }
             }

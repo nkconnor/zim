@@ -1,5 +1,7 @@
 # Zim Editor
 
+
+
 A modern, fast terminal-based text editor with vim-like keybindings and intelligent features.
 
 ## Overview

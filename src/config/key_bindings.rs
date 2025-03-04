@@ -88,7 +88,9 @@ impl Default for KeyBindings {
         // Direct file operations without command mode
         normal_mode.insert("save_file".to_string(), KeyBinding::new("w"));
         normal_mode.insert("reload_file".to_string(), KeyBinding::new("e"));
-        normal_mode.insert("save_and_quit".to_string(), KeyBinding::new("x"));
+        normal_mode.insert("save_and_quit".to_string(), KeyBinding::new("X"));
+        normal_mode.insert("delete_line".to_string(), KeyBinding::new("d"));
+        normal_mode.insert("delete_char".to_string(), KeyBinding::new("x"));
         normal_mode.insert("move_left".to_string(), KeyBinding::new("h"));
         normal_mode.insert("move_down".to_string(), KeyBinding::new("j"));
         normal_mode.insert("move_up".to_string(), KeyBinding::new("k"));

@@ -117,6 +117,67 @@ impl Buffer {
             }
         }
     }
+    
+    pub fn delete_line(&mut self, line_idx: usize) {
+        if line_idx < self.lines.len() {
+            // Remove the line
+            self.lines.remove(line_idx);
+            
+            // If this was the last line, add an empty line to ensure buffer always has at least one line
+            if self.lines.is_empty() {
+                self.lines.push(String::new());
+            }
+            
+            // Mark buffer as modified
+            self.is_modified = true;
+            
+            // Update modified lines tracking - shift all line numbers above the deleted line
+            let mut new_modified_lines = HashSet::new();
+            for &modified_line in &self.modified_lines {
+                if modified_line < line_idx {
+                    // Lines before the deleted line keep their indices
+                    new_modified_lines.insert(modified_line);
+                } else if modified_line > line_idx {
+                    // Lines after the deleted line have indices shifted down by 1
+                    new_modified_lines.insert(modified_line - 1);
+                }
+                // The deleted line itself is removed from tracking
+            }
+            self.modified_lines = new_modified_lines;
+        }
+    }
+    
+    pub fn join_line(&mut self, line_idx: usize) {
+        // Join current line with the next line
+        if line_idx < self.lines.len() - 1 {
+            // Get the content of the next line
+            let next_line_content = self.lines[line_idx + 1].clone();
+            
+            // Append it to the current line
+            self.lines[line_idx].push_str(&next_line_content);
+            
+            // Remove the next line
+            self.lines.remove(line_idx + 1);
+            
+            // Mark lines as modified
+            self.modified_lines.insert(line_idx);
+            self.is_modified = true;
+            
+            // Update modified lines tracking - shift indices above the removed line
+            let mut new_modified_lines = HashSet::new();
+            for &modified_line in &self.modified_lines {
+                if modified_line <= line_idx {
+                    // Lines up to the joined line keep their indices
+                    new_modified_lines.insert(modified_line);
+                } else if modified_line > line_idx + 1 {
+                    // Lines after the deleted line have indices shifted down by 1
+                    new_modified_lines.insert(modified_line - 1);
+                }
+                // The deleted line itself is removed from tracking
+            }
+            self.modified_lines = new_modified_lines;
+        }
+    }
 
     pub fn insert_newline_at_cursor(&mut self, cursor: &Cursor) {
         if cursor.y >= self.lines.len() {

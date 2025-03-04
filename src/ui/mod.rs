@@ -775,6 +775,15 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     text.push(Line::from("Ctrl+f - Page down"));
     text.push(Line::from(""));
     
+    // Editing
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Editing:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("d - Delete current line"));
+    text.push(Line::from("x - Delete character at cursor and enter insert mode"));
+    text.push(Line::from("Backspace - In insert mode at line start, joins with previous line"));
+    text.push(Line::from(""));
+    
     // Modes
     text.push(Line::from(vec![
         tui::text::Span::styled("➤ Mode Switching:", Style::default().add_modifier(Modifier::BOLD))
@@ -831,7 +840,7 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
         tui::text::Span::raw("         - Reload current file from disk (prompts with diff highlighting)")
     ]));
     text.push(Line::from(vec![
-        tui::text::Span::styled("x", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        tui::text::Span::styled("X", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         tui::text::Span::raw("         - Save and quit (prompts for confirmation)")
     ]));
     text.push(Line::from(vec![
@@ -892,7 +901,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         },
         Mode::FileFinder => "FILE FINDER".to_string(),
         Mode::Help => "HELP".to_string(),
-        Mode::WriteConfirm => "WRITE? (y/n)".to_string(),
+        Mode::WriteConfirm => "WRITE? (y/n/q)".to_string(),
         Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
         Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
     };
@@ -915,7 +924,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             // Count modified lines
             let modified_line_count = editor.current_tab().buffer.get_modified_lines().len();
             
-            format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel", 
+            format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel, Q to quit without saving", 
                 mode_text, file_info, modified_line_count)
         },
         Mode::ReloadConfirm => {
