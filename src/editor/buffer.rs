@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::collections::HashSet;
 use super::cursor::Cursor;
+use similar::{ChangeTag, TextDiff};
 
 pub struct Buffer {
     pub lines: Vec<String>,
@@ -244,41 +245,9 @@ impl Buffer {
         &self.modified_lines
     }
     
-    /// Load file content for comparison without applying it to the buffer
-    pub fn load_file_for_diff(&self, path: &str) -> Result<Vec<String>> {
-        // Read the file content as is
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {}", path))?;
-        
-        // Parse lines exactly the same way as in load_file to ensure consistency
-        let mut lines = Vec::new();
-        
-        if content.is_empty() {
-            // Empty file - add a single empty line
-            lines.push(String::new());
-        } else {
-            // Split at each newline, keeping track of positions
-            let mut start = 0;
-            
-            // Process each line including the last one
-            for (i, c) in content.char_indices() {
-                if c == '\n' {
-                    // Add the line up to the newline (but not including it)
-                    lines.push(content[start..i].to_string());
-                    start = i + 1; // Start the next line after the newline
-                }
-            }
-            
-            // Add the last line (after the last newline, or the only line if no newlines)
-            if start <= content.len() {
-                lines.push(content[start..].to_string());
-            }
-        }
-        
-        Ok(lines)
-    }
+    // We use the similar crate for diffing, so we no longer need the load_file_for_diff method
     
-    /// Find differences between current buffer and on-disk version
+    /// Find differences between current buffer and on-disk version using sophisticated diff algorithm
     pub fn diff_with_disk(&self) -> Result<HashSet<usize>> {
         // If no file path, can't diff
         let path = match &self.file_path {
@@ -286,29 +255,53 @@ impl Buffer {
             None => return Ok(HashSet::new()),
         };
         
-        // Load the on-disk content
-        let on_disk_lines = self.load_file_for_diff(path)?;
+        // Read the disk content
+        let disk_content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path))?;
         
-        // Find differences
+        // Get the buffer content as a single string
+        let buffer_content = self.get_content();
+        
+        // Create a diff
+        let diff = TextDiff::from_lines(&disk_content, &buffer_content);
+        
+        // Track only the changed lines in the buffer
         let mut diff_lines = HashSet::new();
         
-        // The maximum length of the two line sets
-        let max_lines = self.lines.len().max(on_disk_lines.len());
+        // Process hunks of changes
+        let mut buffer_line = 0; // Current line in the buffer
         
-        for i in 0..max_lines {
-            // Line exists in both buffer and on disk
-            if i < self.lines.len() && i < on_disk_lines.len() {
-                if self.lines[i] != on_disk_lines[i] {
-                    diff_lines.insert(i);
-                }
-            } 
-            // Line exists in buffer but not on disk
-            else if i < self.lines.len() {
-                diff_lines.insert(i);
+        // Process each change
+        for change in diff.iter_all_changes() {
+            match change.tag() {
+                // Equal lines mean no change - just advance our buffer position
+                ChangeTag::Equal => {
+                    buffer_line += 1;
+                },
+                // Insertions are lines that exist in the buffer but not on disk
+                ChangeTag::Insert => {
+                    // Mark this line as changed
+                    diff_lines.insert(buffer_line);
+                    buffer_line += 1;
+                },
+                // Deletions are lines that exist on disk but not in buffer
+                // We don't increment buffer_line since these lines don't exist in the buffer
+                ChangeTag::Delete => {}
             }
-            // Line exists on disk but not in buffer
-            else if i < on_disk_lines.len() {
-                diff_lines.insert(i);
+        }
+        
+        // Add context lines for better visual feedback - 
+        // only 1 line of context above/below to avoid excessive highlighting
+        let context_lines = diff_lines.clone();
+        for line in context_lines {
+            // One line above (if possible)
+            if line > 0 {
+                diff_lines.insert(line - 1);
+            }
+            
+            // One line below (if possible)
+            if line + 1 < self.lines.len() {
+                diff_lines.insert(line + 1);
             }
         }
         
