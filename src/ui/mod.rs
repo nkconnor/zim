@@ -374,8 +374,27 @@ fn render_editor_area_inner<B: Backend>(
             
             let number_str = format!("{:>width$} ", line_number, width=line_num_width);
             
-            // Create line with number followed by content
+            // Check if this line has diagnostics and add a gutter indicator
+            let has_diagnostics = tab.diagnostics.get_diagnostics_for_line(current_line_idx).is_some();
+            let (indicator, indicator_style) = if has_diagnostics {
+                let diagnostics = tab.diagnostics.get_diagnostics_for_line(current_line_idx).unwrap();
+                let has_error = diagnostics.iter().any(|d| d.severity == crate::editor::DiagnosticSeverity::Error);
+                let has_warning = diagnostics.iter().any(|d| d.severity == crate::editor::DiagnosticSeverity::Warning);
+                
+                if has_error {
+                    ("●", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                } else if has_warning {
+                    ("●", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                } else {
+                    ("●", Style::default().fg(Color::Blue))
+                }
+            } else {
+                (" ", Style::default())
+            };
+            
+            // Create line with gutter indicator, number, and content
             let mut spans = vec![
+                tui::text::Span::styled(indicator, indicator_style),
                 tui::text::Span::styled(number_str, number_style)
             ];
             

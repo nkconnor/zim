@@ -410,6 +410,30 @@ impl Editor {
 /// 
 /// This is a general-purpose function that can run any cargo command
 /// and parse its output for diagnostics. It reduces code duplication.
+/// Find the project root directory by looking for Cargo.toml
+pub fn find_project_root(&self) -> Option<String> {
+    // First try from the current buffer's file path
+    if let Some(file_path) = &self.current_tab().buffer.file_path {
+        let path = std::path::Path::new(file_path);
+        let mut dir = path.parent();
+        
+        // Walk up the directory tree looking for Cargo.toml
+        while let Some(current_dir) = dir {
+            let cargo_toml = current_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                return Some(current_dir.to_string_lossy().to_string());
+            }
+            dir = current_dir.parent();
+        }
+    }
+    
+    // Fallback to current directory
+    match std::env::current_dir() {
+        Ok(path) => Some(path.to_string_lossy().to_string()),
+        Err(_) => None
+    }
+}
+
 pub fn run_cargo_command(&mut self, cargo_dir: &str, command: &str) -> Result<()> {
     use std::process::Command;
     
@@ -649,6 +673,13 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             // Add to recent files if we have a file path (clone to avoid borrowing issues)
             if let Some(file_path) = self.current_tab().buffer.file_path.clone() {
                 self.file_finder.add_recent_file(&file_path);
+            }
+            
+            // Run diagnostics in the background for the newly loaded file
+            if let Some(project_dir) = self.find_project_root() {
+                if let Err(_) = self.run_cargo_command(&project_dir, "check") {
+                    // Silently ignore errors in background diagnostics
+                }
             }
         }
         
@@ -1073,6 +1104,13 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             // Add to recent files list
                             self.file_finder.add_recent_file(&path);
                             
+                            // Run diagnostics in the background after saving
+                            if let Some(project_dir) = self.find_project_root() {
+                                if let Err(_) = self.run_cargo_command(&project_dir, "check") {
+                                    // Silently ignore errors in background diagnostics
+                                }
+                            }
+                            
                             // Check if we should quit after saving
                             if should_quit {
                                 self.save_and_quit = false;
@@ -1130,6 +1168,13 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     } else {
                         // Add to recent files
                         self.file_finder.add_recent_file(&filename);
+                        
+                        // Run diagnostics in the background after saving with new filename
+                        if let Some(project_dir) = self.find_project_root() {
+                            if let Err(_) = self.run_cargo_command(&project_dir, "check") {
+                                // Silently ignore errors in background diagnostics
+                            }
+                        }
                         
                         // Check if we should quit after saving
                         if should_quit {
@@ -1240,6 +1285,13 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             if !path.starts_with("untitled-") {
                                 if let Err(_) = self.current_tab_mut().buffer.load_file(path) {
                                     // Error will be displayed in status bar
+                                } else {
+                                    // Run diagnostics in the background for the reloaded file
+                                    if let Some(project_dir) = self.find_project_root() {
+                                        if let Err(_) = self.run_cargo_command(&project_dir, "check") {
+                                            // Silently ignore errors in background diagnostics
+                                        }
+                                    }
                                 }
                             }
                         }
