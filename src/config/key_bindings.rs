@@ -97,7 +97,7 @@ impl Default for KeyBindings {
         normal_mode.insert("move_right".to_string(), KeyBinding::new("l"));
         normal_mode.insert(
             "find_file".to_string(),
-            KeyBinding::new("p").with_modifier("ctrl"),
+            KeyBinding::new("o").with_modifier("ctrl"),
         );
 
         // Line navigation

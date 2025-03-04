@@ -1357,7 +1357,7 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     text.push(Line::from(vec![
         tui::text::Span::styled("➤ File Operations:", Style::default().add_modifier(Modifier::BOLD))
     ]));
-    text.push(Line::from("Ctrl+p - Find file"));
+    text.push(Line::from("Ctrl+o - Open file (finder)"));
     text.push(Line::from("q - Quit (in normal mode)"));
     text.push(Line::from(""));
     

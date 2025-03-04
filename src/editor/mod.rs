@@ -888,7 +888,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 tab.cursor.move_right(&tab.buffer);
                 self.update_viewport();
             },
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::FileFinder;
                 self.file_finder.refresh()?;
             },
