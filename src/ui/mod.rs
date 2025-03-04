@@ -1131,66 +1131,130 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
-    // Create a block for the file finder
+    // Create a block for the file finder with a nicer title
     let file_finder_block = Block::default()
-        .title(" Find File ")
-        .borders(Borders::ALL);
+        .title(" Zim Editor ")
+        .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
 
     let inner_area = file_finder_block.inner(area);
     f.render_widget(file_finder_block, area);
 
-    // Create search input area at the top
-    let search_layout = Layout::default()
+    // Create overall layout with welcome header, search input, and file list
+    let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
+            Constraint::Length(5), // Welcome header
+            Constraint::Length(3), // Search input
+            Constraint::Min(1),    // File list
         ].as_ref())
         .split(inner_area);
 
+    // Render welcome header only if query is empty (initial state)
+    if editor.file_finder.query().is_empty() {
+        let welcome_text = vec![
+            Line::from(vec![
+                Span::styled("Welcome to ", Style::default().fg(Color::White)),
+                Span::styled("ZIM Editor", Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Type to search for files or use arrow keys to navigate", 
+                    Style::default().fg(Color::Gray)),
+            ]),
+        ];
+        
+        let welcome_paragraph = Paragraph::new(welcome_text)
+            .alignment(tui::layout::Alignment::Center)
+            .block(Block::default()
+                .borders(Borders::NONE));
+        
+        f.render_widget(welcome_paragraph, main_layout[0]);
+    }
+
     // Render search query
     let search_block = Block::default()
-        .title(" Search ")
+        .title(" Search Files ")
+        .title_style(Style::default().fg(Color::LightBlue))
         .borders(Borders::ALL);
     
     let search_text = Paragraph::new(editor.file_finder.query())
         .block(search_block)
         .style(Style::default());
     
-    f.render_widget(search_text, search_layout[0]);
+    f.render_widget(search_text, main_layout[1]);
 
     // Render file list
+    let list_title = if editor.file_finder.query().is_empty() {
+        " Recent Files "
+    } else {
+        " Search Results "
+    };
+    
     let list_block = Block::default()
-        .title(" Files ")
+        .title(list_title)
+        .title_style(Style::default().fg(Color::Green))
         .borders(Borders::ALL);
 
     let matches = editor.file_finder.matches();
     let selected_index = editor.file_finder.selected_index();
     
-    let items: Vec<ListItem> = matches
-        .iter()
-        .enumerate()
-        .map(|(i, (path, _score))| {
-            let style = if i == selected_index {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            
-            ListItem::new(path.clone()).style(style)
-        })
-        .collect();
+    let items: Vec<ListItem> = if matches.is_empty() && editor.file_finder.query().is_empty() {
+        // Show a message when there are no recent files
+        vec![ListItem::new("No recent files. Type to search or press Esc to open a blank file.")]
+    } else if matches.is_empty() {
+        // Show a message when there are no search results
+        vec![ListItem::new("No matching files found. Press Esc to cancel.")]
+    } else {
+        matches
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _score))| {
+                // Extract just the filename for display
+                let display_path = if let Some(file_name) = std::path::Path::new(path).file_name() {
+                    format!("{} ({})", file_name.to_string_lossy(), path)
+                } else {
+                    path.clone()
+                };
+                
+                let style = if i == selected_index {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                
+                ListItem::new(display_path).style(style)
+            })
+            .collect()
+    };
 
     let file_list = List::new(items)
         .block(list_block)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
     
-    f.render_widget(file_list, search_layout[1]);
+    f.render_widget(file_list, main_layout[2]);
+
+    // Add a small help text at the bottom of the file list area
+    let help_text = "Press Enter to select, Esc for normal mode, Ctrl+n for new file";
+    let help_paragraph = Paragraph::new(help_text)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(tui::layout::Alignment::Center);
+    
+    // Calculate a small area at the bottom for the help text
+    let help_area = Rect {
+        x: main_layout[2].x,
+        y: main_layout[2].y + main_layout[2].height.saturating_sub(1),
+        width: main_layout[2].width,
+        height: 1,
+    };
+    
+    f.render_widget(help_paragraph, help_area);
 
     // Set cursor at the end of the search query
     f.set_cursor(
-        search_layout[0].x + editor.file_finder.query().len() as u16 + 1,
-        search_layout[0].y + 1,
+        main_layout[1].x + editor.file_finder.query().len() as u16 + 1,
+        main_layout[1].y + 1,
     );
 }
 

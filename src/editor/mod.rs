@@ -123,10 +123,11 @@ impl Editor {
         let mut tabs = Vec::new();
         tabs.push(Tab::new_with_name("untitled-1"));
         
-        Self {
+        // Initialize with file finder mode to show welcome screen
+        let mut editor = Self {
             tabs,
             current_tab: 0,
-            mode: Mode::Normal,
+            mode: Mode::FileFinder,
             file_finder: FileFinder::new(),
             config,
             save_and_quit: false,
@@ -136,7 +137,12 @@ impl Editor {
             syntax_highlighter: SyntaxHighlighter::new(),
             highlighted_lines_cache: HashMap::new(),
             clipboard: String::new(),
-        }
+        };
+        
+        // Refresh file finder to populate files list
+        let _ = editor.file_finder.refresh();
+        
+        editor
     }
     
     /// Invalidate the syntax highlighting cache when a buffer is modified
@@ -315,6 +321,11 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             
             // Set the syntax
             self.current_tab_mut().buffer.set_syntax(syntax);
+            
+            // Add to recent files if we have a file path (clone to avoid borrowing issues)
+            if let Some(file_path) = self.current_tab().buffer.file_path.clone() {
+                self.file_finder.add_recent_file(&file_path);
+            }
         }
         
         result
@@ -447,6 +458,9 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             // Show a success message
                             println!("File saved successfully: {}", path);
                             
+                            // Add to recent files list
+                            self.file_finder.add_recent_file(&path);
+                            
                             // Check if we should quit after saving
                             if should_quit {
                                 self.save_and_quit = false;
@@ -503,6 +517,9 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         println!("Error saving file: {}", e);
                     } else {
                         println!("File saved successfully: {}", filename);
+                        
+                        // Add to recent files
+                        self.file_finder.add_recent_file(&filename);
                         
                         // Check if we should quit after saving
                         if should_quit {
