@@ -1885,6 +1885,7 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     ]));
     text.push(Line::from("Ctrl+o   - Open file (finder)"));
     text.push(Line::from("w        - Save current file"));
+    text.push(Line::from("w → a    - Save all files in all tabs (press 'a' in write confirm mode)"));
     text.push(Line::from("e        - Reload file from disk"));
     text.push(Line::from("q        - Quit editor"));
     text.push(Line::from(":q!      - Force quit (discard changes)"));

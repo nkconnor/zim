@@ -1141,6 +1141,55 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 self.save_and_quit = false;
                 return Ok(false); // Exit the editor
             },
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                // User wants to save all tabs (equivalent to :wa in vim)
+                let mut all_saved = true;
+                
+                for tab_idx in 0..self.tabs.len() {
+                    // Switch to the tab temporarily
+                    let original_tab = self.current_tab;
+                    self.current_tab = tab_idx;
+                    
+                    // Try to save the tab
+                    if let Some(path) = self.current_tab().buffer.file_path.clone() {
+                        if !path.starts_with("untitled-") {
+                            if let Err(_) = self.current_tab_mut().buffer.save(None) {
+                                // Error saving this tab
+                                all_saved = false;
+                            } else {
+                                // Add to recent files list
+                                self.file_finder.add_recent_file(&path);
+                                
+                                // Run diagnostics in the background after saving
+                                if let Some(project_dir) = self.find_project_root() {
+                                    if let Err(_) = self.run_cargo_command(&project_dir, "check") {
+                                        // Silently ignore errors in background diagnostics
+                                    }
+                                }
+                            }
+                        } else {
+                            // Untitled files need a real name, so we can't auto-save them
+                            all_saved = false;
+                        }
+                    } else {
+                        // No filename, can't save
+                        all_saved = false;
+                    }
+                    
+                    // Switch back to the original tab
+                    self.current_tab = original_tab;
+                }
+                
+                // Check if we should quit after saving all
+                if should_quit && all_saved {
+                    self.save_and_quit = false;
+                    return Ok(false); // Exit the editor
+                }
+                
+                // Return to normal mode
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
             _ => Ok(true), // Ignore other keys in write confirm mode
         }
     }
