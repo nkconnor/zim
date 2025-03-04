@@ -112,6 +112,8 @@ pub struct Editor {
     pub highlighted_lines_cache: HashMap<(usize, usize), Vec<HighlightedLine>>,
     /// Clipboard for storing yanked/copied text
     pub clipboard: String,
+    /// Selected diagnostic index for the diagnostics panel
+    pub selected_diagnostic_index: usize,
 }
 
 use grep::matcher::Matcher;
@@ -310,6 +312,7 @@ impl Editor {
             syntax_highlighter: SyntaxHighlighter::new(),
             highlighted_lines_cache: HashMap::new(),
             clipboard: String::new(),
+            selected_diagnostic_index: 0,
         };
         
         // Refresh file finder to populate files list
@@ -403,8 +406,133 @@ pub fn run_cargo_command(&mut self, cargo_dir: &str, command: &str) -> Result<()
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     
+    // Combine stdout and stderr
+    let full_output = format!("{}\n{}", stdout, stderr);
+    
     // Parse the diagnostics, scoping to the current file
-    self.current_tab_mut().diagnostics.parse_cargo_output(&format!("{}\n{}", stdout, stderr), &current_file);
+    {
+        let tab = self.current_tab_mut();
+        let diagnostics = std::mem::take(&mut tab.diagnostics);
+        tab.diagnostics = diagnostics.parse_cargo_output(&full_output, &current_file);
+    }
+    
+    // Check for diagnostics and process in smaller scopes to avoid borrow issues
+    let has_diagnostics;
+    let first_line_opt;
+    
+    // First, gather information about diagnostics
+    {
+        let tab = self.current_tab();
+        has_diagnostics = tab.diagnostics.error_count() > 0 || tab.diagnostics.warning_count() > 0;
+        first_line_opt = if has_diagnostics {
+            tab.diagnostics.get_diagnostic_line_numbers().first().copied()
+        } else {
+            None
+        };
+    }
+    
+    // Then, set the mode based on diagnostics
+    if has_diagnostics {
+        self.mode = Mode::DiagnosticsPanel;
+        self.selected_diagnostic_index = 0; // Reset to first diagnostic
+    }
+    
+    // Finally, navigate to the diagnostic if available
+    if let Some(first_line) = first_line_opt {
+        let first_column;
+        
+        // Get the column in a separate scope
+        {
+            let tab = self.current_tab();
+            if let Some(diagnostics) = tab.diagnostics.get_diagnostics_for_line(first_line) {
+                if !diagnostics.is_empty() {
+                    first_column = diagnostics[0].span.start_column;
+                } else {
+                    first_column = 0;
+                }
+            } else {
+                first_column = 0;
+            }
+        }
+        
+        // Update cursor and viewport
+        {
+            let tab = self.current_tab_mut();
+            tab.cursor.y = first_line;
+            tab.cursor.x = first_column;
+            
+            // Position the line with better context (not at the top edge)
+            let desired_offset = tab.viewport.height / 3;
+            if first_line > desired_offset {
+                tab.viewport.top_line = first_line.saturating_sub(desired_offset);
+            } else {
+                tab.viewport.top_line = 0;
+            }
+        }
+        
+        // Ensure the cursor is visible
+        self.update_viewport();
+    }
+    
+    Ok(())
+}
+
+/// Navigate to the next diagnostic in the current file
+pub fn goto_next_diagnostic(&mut self) -> Result<()> {
+    let tab = self.current_tab();
+    if let Some(next_line) = tab.diagnostics.next_diagnostic_line(tab.cursor.y) {
+        // Position cursor at the next diagnostic line
+        let tab = self.current_tab_mut();
+        tab.cursor.y = next_line;
+        
+        // If there's a diagnostic for this line, position at its column
+        if let Some(diagnostics) = tab.diagnostics.get_diagnostics_for_line(next_line) {
+            if !diagnostics.is_empty() {
+                tab.cursor.x = diagnostics[0].span.start_column;
+            }
+        }
+        
+        // Position the line with better context (not at the top edge)
+        let desired_offset = tab.viewport.height / 3;
+        if next_line > desired_offset {
+            tab.viewport.top_line = next_line.saturating_sub(desired_offset);
+        } else {
+            tab.viewport.top_line = 0;
+        }
+        
+        // Ensure the cursor is visible
+        self.update_viewport();
+    }
+    
+    Ok(())
+}
+
+/// Navigate to the previous diagnostic in the current file
+pub fn goto_prev_diagnostic(&mut self) -> Result<()> {
+    let tab = self.current_tab();
+    if let Some(prev_line) = tab.diagnostics.prev_diagnostic_line(tab.cursor.y) {
+        // Position cursor at the previous diagnostic line
+        let tab = self.current_tab_mut();
+        tab.cursor.y = prev_line;
+        
+        // If there's a diagnostic for this line, position at its column
+        if let Some(diagnostics) = tab.diagnostics.get_diagnostics_for_line(prev_line) {
+            if !diagnostics.is_empty() {
+                tab.cursor.x = diagnostics[0].span.start_column;
+            }
+        }
+        
+        // Position the line with better context (not at the top edge)
+        let desired_offset = tab.viewport.height / 3;
+        if prev_line > desired_offset {
+            tab.viewport.top_line = prev_line.saturating_sub(desired_offset);
+        } else {
+            tab.viewport.top_line = 0;
+        }
+        
+        // Ensure the cursor is visible
+        self.update_viewport();
+    }
     
     Ok(())
 }
@@ -531,6 +659,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
             Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
             Mode::TokenSearch => self.handle_token_search_mode(key),
+            Mode::DiagnosticsPanel => self.handle_diagnostics_panel_mode(key),
             // Visual mode with character selection
             Mode::Visual => {
                 use crossterm::event::KeyCode;
@@ -617,6 +746,79 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
     }
     
     /// Handle key events in token search mode
+    /// Handler for the diagnostics panel mode
+    fn handle_diagnostics_panel_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        
+        match key.code {
+            KeyCode::Esc => {
+                // Return to normal mode
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Char('q') => {
+                // Return to normal mode
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Char('n') | KeyCode::Down | KeyCode::Char('j') => {
+                // Move to next diagnostic in the panel
+                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                if !diagnostics.is_empty() {
+                    self.selected_diagnostic_index = (self.selected_diagnostic_index + 1) % diagnostics.len();
+                }
+            },
+            KeyCode::Char('p') | KeyCode::Up | KeyCode::Char('k') => {
+                // Move to previous diagnostic in the panel
+                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                if !diagnostics.is_empty() {
+                    self.selected_diagnostic_index = if self.selected_diagnostic_index == 0 {
+                        diagnostics.len() - 1
+                    } else {
+                        self.selected_diagnostic_index - 1
+                    };
+                }
+            },
+            KeyCode::Enter => {
+                // Navigate to the selected diagnostic and switch back to normal mode
+                let diagnostics = self.current_tab().diagnostics.get_all_diagnostics();
+                
+                if !diagnostics.is_empty() && self.selected_diagnostic_index < diagnostics.len() {
+                    // Get the selected diagnostic - clone the necessary fields to avoid borrow conflicts
+                    let line = diagnostics[self.selected_diagnostic_index].span.line;
+                    let start_column = diagnostics[self.selected_diagnostic_index].span.start_column;
+                    
+                    // Position cursor at the diagnostic location
+                    let tab = self.current_tab_mut();
+                    tab.cursor.y = line;
+                    tab.cursor.x = start_column;
+                    
+                    // Position the line with better context (not at the top edge)
+                    let desired_offset = tab.viewport.height / 3;
+                    if line > desired_offset {
+                        tab.viewport.top_line = line.saturating_sub(desired_offset);
+                    } else {
+                        tab.viewport.top_line = 0;
+                    }
+                    
+                    // Ensure the cursor is visible
+                    self.update_viewport();
+                    
+                    // Switch back to normal mode
+                    self.mode = Mode::Normal;
+                }
+            },
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Return to normal mode on Ctrl+E (toggle)
+                self.mode = Mode::Normal;
+            },
+            _ => {
+                // Pass keys like h, l, $ etc. to normal mode handler
+                return self.handle_normal_mode(key);
+            }
+        }
+        
+        Ok(true)
+    }
+    
     fn handle_token_search_mode(&mut self, key: KeyEvent) -> Result<bool> {
         let bindings = &self.config.key_bindings.token_search_mode;
         
@@ -1214,6 +1416,25 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::TokenSearch;
                 self.token_search = TokenSearch::new();
+            },
+            // Toggle diagnostics panel with Ctrl+E (errors)
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.mode == Mode::DiagnosticsPanel {
+                    self.mode = Mode::Normal;
+                } else {
+                    self.mode = Mode::DiagnosticsPanel;
+                    
+                    // If there are diagnostics, navigate to the first one
+                    let _ = self.goto_next_diagnostic();
+                }
+            },
+            // Navigate to next diagnostic with Ctrl+N (next error)
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let _ = self.goto_next_diagnostic();
+            },
+            // Navigate to previous diagnostic with Ctrl+P (previous error)
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) && key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let _ = self.goto_prev_diagnostic();
             },
             // Paste clipboard after cursor (p key)
             KeyCode::Char('p') if !key.modifiers.contains(KeyModifiers::CONTROL) && 

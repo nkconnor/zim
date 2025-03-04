@@ -434,5 +434,204 @@ impl DiagnosticCollection {
         
         self
     }
-}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_diagnostic_creation() {
+        let span = TextSpan::new(10, 5, 15);
+        let diagnostic = Diagnostic::new("Unused variable", DiagnosticSeverity::Warning, span);
+        
+        assert_eq!(diagnostic.message, "Unused variable");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.span.line, 10);
+        assert_eq!(diagnostic.span.start_column, 5);
+        assert_eq!(diagnostic.span.end_column, 15);
+        assert_eq!(diagnostic.related_info, None);
+    }
+    
+    #[test]
+    fn test_diagnostic_collection() {
+        let mut collection = DiagnosticCollection::new();
+        
+        // Add diagnostic
+        let diagnostic1 = Diagnostic::new(
+            "Unused variable", 
+            DiagnosticSeverity::Warning,
+            TextSpan::new(10, 5, 15)
+        );
+        
+        collection.add_diagnostic(diagnostic1);
+        
+        // Check retrieval
+        let line_diagnostics = collection.get_diagnostics_for_line(10).unwrap();
+        assert_eq!(line_diagnostics.len(), 1);
+        assert_eq!(line_diagnostics[0].message, "Unused variable");
+        
+        // Add another diagnostic on the same line
+        let diagnostic2 = Diagnostic::new(
+            "Missing semicolon", 
+            DiagnosticSeverity::Error,
+            TextSpan::new(10, 20, 25)
+        );
+        
+        collection.add_diagnostic(diagnostic2);
+        
+        // Check retrieval again
+        let line_diagnostics = collection.get_diagnostics_for_line(10).unwrap();
+        assert_eq!(line_diagnostics.len(), 2);
+        
+        // Clear collection
+        collection.clear();
+        assert!(collection.get_diagnostics_for_line(10).is_none());
+    }
+    
+    #[test]
+    fn test_parse_error_diagnostic() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/main.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        error[E0308]: mismatched types
+          --> src/main.rs:52:18
+           |
+        52 |     let x: i32 = "not a number";
+           |            ---   ^^^^^^^^^^^^^^ expected `i32`, found `&str`
+           |            |
+           |            expected due to this
+        
+        For more information about this error, try `rustc --explain E0308`.
+        error: could not compile `zim` (bin "zim") due to 1 previous error
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify the diagnostic was parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 1);
+        
+        let diagnostics = collection.get_diagnostics_for_line(51).unwrap(); // 0-indexed, so line 52 -> 51
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+        assert_eq!(diagnostics[0].message, "mismatched types");
+        assert_eq!(diagnostics[0].span.start_column, 17); // 0-indexed
+        
+        // Check that the span width matches the ^^^^^^ indicators
+        assert!(diagnostics[0].span.end_column > diagnostics[0].span.start_column);
+    }
+    
+    #[test]
+    fn test_parse_warning_diagnostic() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/config/mod.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        warning: this import is redundant
+         --> src/config/mod.rs:2:1
+          |
+        2 | use dirs;
+          | ^^^^^^^^^ help: remove it entirely
+          |
+          = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#single_component_path_imports
+          = note: `#[warn(clippy::single_component_path_imports)]` on by default
+        
+        warning: `zim` (bin "zim") generated 1 warning
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify the diagnostic was parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 1);
+        
+        let diagnostics = collection.get_diagnostics_for_line(1).unwrap(); // 0-indexed, so line 2 -> 1
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostics[0].message, "this import is redundant");
+        assert_eq!(diagnostics[0].span.start_column, 0); // 0-indexed
+    }
+    
+    #[test]
+    fn test_parse_multiple_diagnostics() {
+        let mut collection = DiagnosticCollection::new();
+        let current_file = "src/main.rs";
+        
+        let cargo_output = r#"
+        Checking zim v0.1.0 (/home/nconnor/p/zim/zim)
+        error[E0308]: mismatched types
+          --> src/main.rs:52:18
+           |
+        52 |     let x: i32 = "not a number";
+           |            ---   ^^^^^^^^^^^^^^ expected `i32`, found `&str`
+           |            |
+           |            expected due to this
+        
+        warning: unused variable: `x`
+          --> src/main.rs:52:9
+           |
+        52 |     let x: i32 = "not a number";
+           |         ^ help: if this is intentional, prefix it with an underscore: `_x`
+           |
+           = note: `#[warn(unused_variables)]` on by default
+        
+        error: could not compile `zim` (bin "zim") due to previous error
+        "#;
+        
+        collection.parse_cargo_output(cargo_output, current_file);
+        
+        // Verify both diagnostics were parsed correctly
+        assert_eq!(collection.get_all_diagnostics().len(), 2);
+        
+        let diagnostics = collection.get_diagnostics_for_line(51).unwrap(); // 0-indexed, so line 52 -> 51
+        assert_eq!(diagnostics.len(), 2);
+        
+        // Find the error and warning
+        let error = diagnostics.iter().find(|d| d.severity == DiagnosticSeverity::Error).unwrap();
+        let warning = diagnostics.iter().find(|d| d.severity == DiagnosticSeverity::Warning).unwrap();
+        
+        assert_eq!(error.message, "mismatched types");
+        assert_eq!(warning.message, "unused variable: `x`");
+    }
+    
+    #[test]
+    fn test_file_path_matching() {
+        let mut collection = DiagnosticCollection::new();
+        
+        // Test with different file path formats
+        let test_cases = [
+            // Current file, diagnostic file, should match
+            ("src/main.rs", "src/main.rs", true),
+            ("/home/user/project/src/main.rs", "src/main.rs", true),
+            ("src/main.rs", "/home/user/project/src/main.rs", true),
+            ("main.rs", "src/main.rs", true),
+            ("editor/buffer.rs", "src/editor/buffer.rs", true),
+            // Different files shouldn't match
+            ("src/main.rs", "src/lib.rs", false),
+            ("src/editor/buffer.rs", "src/editor/cursor.rs", false),
+        ];
+        
+        for (idx, (current_file, diagnostic_file, should_match)) in test_cases.iter().enumerate() {
+            let cargo_output = format!(r#"
+            Checking zim v0.1.0 (/home/user/project)
+            error: test error {}
+              --> {}:10:5
+               |
+            10 |     let x = 5;
+               |     ^^^^^^^^^ test error
+            "#, idx, diagnostic_file);
+            
+            collection.clear();
+            collection.parse_cargo_output(&cargo_output, current_file);
+            
+            if *should_match {
+                assert!(!collection.get_all_diagnostics().is_empty(), 
+                    "Case {} failed: '{}' should match '{}'", idx, current_file, diagnostic_file);
+            } else {
+                assert!(collection.get_all_diagnostics().is_empty(),
+                    "Case {} failed: '{}' should NOT match '{}'", idx, current_file, diagnostic_file);
+            }
+        }
+    }
+}

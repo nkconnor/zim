@@ -11,6 +11,8 @@ pub enum Mode {
     FileFinder,
     /// Token search mode (for finding and navigating to code tokens)
     TokenSearch,
+    /// Diagnostics panel mode (for viewing and navigating errors/warnings)
+    DiagnosticsPanel,
     /// Help mode (displays keyboard shortcuts and help information)
     Help,
     /// Write confirmation mode (for confirming file write)

@@ -57,6 +57,10 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
         Mode::FilenamePrompt => {
             render_filename_prompt(f, editor, chunks[1]);
         },
+        Mode::DiagnosticsPanel => {
+            // In DiagnosticsPanel mode, show a specialized view of diagnostics
+            render_diagnostics_panel(f, editor, chunks[1]);
+        },
         Mode::Visual | Mode::VisualLine => {
             // In Visual modes, highlight the selection
             viewport_update = render_editor_area_with_selection(f, editor, chunks[1]);
@@ -1133,6 +1137,196 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+/// Render the diagnostics panel interface
+fn render_diagnostics_panel<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Create a block for the diagnostics panel
+    let diagnostics_block = Block::default()
+        .title(" Diagnostics ")
+        .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let inner_area = diagnostics_block.inner(area);
+    f.render_widget(diagnostics_block, area);
+
+    // Create layout for filter controls and diagnostics list
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Filter/controls
+            Constraint::Min(1),    // Diagnostics list
+        ].as_ref())
+        .split(inner_area);
+
+    // Render filter controls
+    let filter_block = Block::default()
+        .title(" Filter ")
+        .title_style(Style::default().fg(Color::LightBlue))
+        .borders(Borders::ALL);
+    
+    // Show filter controls and keyboard shortcuts
+    let filter_text = vec![
+        Line::from(vec![
+            Span::styled("Errors: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw("E"),
+            Span::styled(" | ", Style::default()),
+            Span::styled("Warnings: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw("W"),
+            Span::styled(" | ", Style::default()),
+            Span::styled("Info: ", Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)),
+            Span::raw("I"),
+            Span::styled(" | ", Style::default()),
+            Span::styled("All: ", Style::default()),
+            Span::raw("A"),
+        ]),
+        Line::from(vec![
+            Span::styled("Navigation: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("j/k or up/down, Enter to go to error, Esc to exit"),
+        ]),
+    ];
+    
+    let filter_paragraph = Paragraph::new(filter_text)
+        .block(filter_block)
+        .alignment(tui::layout::Alignment::Center);
+    
+    f.render_widget(filter_paragraph, main_layout[0]);
+
+    // Render diagnostics list
+    let tab = editor.current_tab();
+    let all_diagnostics = tab.diagnostics.get_all_diagnostics();
+    
+    // Collect counts by severity
+    let error_count = all_diagnostics.iter()
+        .filter(|d| d.severity == crate::editor::DiagnosticSeverity::Error)
+        .count();
+    let warning_count = all_diagnostics.iter()
+        .filter(|d| d.severity == crate::editor::DiagnosticSeverity::Warning)
+        .count();
+    let info_count = all_diagnostics.iter()
+        .filter(|d| d.severity == crate::editor::DiagnosticSeverity::Information)
+        .count();
+    
+    // Create the diagnostics list block with counts
+    let list_block = Block::default()
+        .title(format!(" Issues ({} total - {} errors, {} warnings, {} info) ", 
+            all_diagnostics.len(), error_count, warning_count, info_count))
+        .title_style(Style::default().fg(Color::Green))
+        .borders(Borders::ALL);
+
+    let list_area = list_block.inner(main_layout[1]);
+    f.render_widget(list_block, main_layout[1]);
+
+    if all_diagnostics.is_empty() {
+        // Show a message when there are no diagnostics
+        let help_text = "No diagnostics found. Press Esc to return to normal mode.";
+        
+        let help_paragraph = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::Gray))
+            .alignment(tui::layout::Alignment::Center);
+        
+        f.render_widget(help_paragraph, list_area);
+    } else {
+        // Create list items from diagnostics
+        let items: Vec<ListItem> = all_diagnostics
+            .iter()
+            .enumerate()
+            .map(|(i, diagnostic)| {
+                // Format the diagnostic message
+                let severity_style = match diagnostic.severity {
+                    crate::editor::DiagnosticSeverity::Error => {
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                    },
+                    crate::editor::DiagnosticSeverity::Warning => {
+                        Style::default().fg(Color::Yellow)
+                    },
+                    crate::editor::DiagnosticSeverity::Information => {
+                        Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)
+                    },
+                    crate::editor::DiagnosticSeverity::Hint => {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC)
+                    },
+                };
+                
+                // Create the severity indicator
+                let severity_icon = match diagnostic.severity {
+                    crate::editor::DiagnosticSeverity::Error => "❌",
+                    crate::editor::DiagnosticSeverity::Warning => "⚠️",
+                    crate::editor::DiagnosticSeverity::Information => "ℹ️",
+                    crate::editor::DiagnosticSeverity::Hint => "💡",
+                };
+                
+                // Get path components for better display
+                let file_path = if diagnostic.file_path.is_empty() { "Unknown" } else { &diagnostic.file_path };
+                let path_parts: Vec<&str> = file_path.split('/').collect();
+                let file_display = if path_parts.len() > 1 {
+                    format!("{}/{}", path_parts[path_parts.len()-2], path_parts[path_parts.len()-1])
+                } else {
+                    file_path.to_string()
+                };
+                
+                // Create the content with location and message
+                let content = Line::from(vec![
+                    Span::styled(
+                        format!("{} ", severity_icon),
+                        severity_style
+                    ),
+                    Span::styled(
+                        format!("{}:{} ", file_display, diagnostic.span.line + 1), // +1 for 1-based display
+                        Style::default().fg(Color::Blue)
+                    ),
+                    Span::styled(
+                        &diagnostic.message,
+                        severity_style
+                    ),
+                ]);
+                
+                // First, create content line
+                let content_line = content;
+                
+                // Build the full item with additional info if available
+                let mut item = ListItem::new(vec![content_line.clone()]);
+                
+                // Add additional info if available - note: this is a Vec<String>, not an Option
+                let additional_info = &diagnostic.additional_info;
+                if !additional_info.is_empty() {
+                    let help_style = Style::default().fg(Color::DarkGray);
+                    
+                    // Create a new list item with the help info appended
+                    let mut lines = vec![content_line.clone()]; // Start with the main content line (clone it)
+                    
+                    for info in additional_info {
+                        if !info.is_empty() {
+                            let help_line = Line::from(vec![
+                                Span::styled(
+                                    format!("  ▶ {}", info),
+                                    help_style
+                                ),
+                            ]);
+                            lines.push(help_line);
+                        }
+                    }
+                    
+                    // Create a new item with all lines
+                    item = ListItem::new(lines);
+                }
+                
+                // Add selection highlighting based on the editor's selected_diagnostic_index
+                if i == editor.selected_diagnostic_index {
+                    item = item.style(Style::default().bg(Color::DarkGray));
+                }
+                
+                item
+            })
+            .collect();
+        
+        let diagnostics_list = List::new(items)
+            .highlight_style(Style::default().bg(Color::DarkGray))
+            .highlight_symbol("> ");
+        
+        f.render_widget(diagnostics_list, list_area);
+    }
+}
+
 /// Render the token search interface
 fn render_token_search<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create a block for the token search
@@ -1596,6 +1790,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::WriteConfirm => "WRITE? (y/n/q)".to_string(),
         Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
         Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
+        Mode::DiagnosticsPanel => "DIAGNOSTICS".to_string(),
         Mode::Visual => "VISUAL".to_string(),
         Mode::VisualLine => "VISUAL LINE".to_string(),
     };
@@ -1604,6 +1799,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::FileFinder => format!("{} | Press Enter to select, Esc to cancel", mode_text),
         Mode::TokenSearch => format!("{} | Press Enter to go to selection, Esc to cancel", mode_text),
         Mode::FilenamePrompt => format!("{} | Press Enter to save, Esc to cancel", mode_text),
+        Mode::DiagnosticsPanel => format!("{} | Press Enter to go to selected error, n/p for next/prev, Esc to exit", mode_text),
         Mode::WriteConfirm => {
             // Get current file info for write confirmation
             let file_info = if let Some(path) = &editor.current_tab().buffer.file_path {
