@@ -14,6 +14,7 @@ Zim is a lightweight, terminal-based text editor built in Rust that combines the
 - **Fuzzy File Finding** - Quickly navigate to files with fuzzy matching
 - **Rust Integration** - Built-in support for Cargo Check/Clippy for Rust projects
 - **Configurable** - Customize key bindings via TOML configuration
+- **Syntax Highlighting** - Automatic language detection and color highlighting
 - **Visual Feedback** - Clear indicators for modifications, diffs, and diagnostics
 - **Modern UI** - Clean interface with informative status line and tab bar
 
@@ -23,6 +24,7 @@ Zim is a lightweight, terminal-based text editor built in Rust that combines the
 - **Enhanced Tab Interface** - Direct access to tabs with F1-F12 keys and clear tab visualization
 - **Smart Diff Highlighting** - More accurate diff highlighting when reloading files
 - **Built-in Rust Support** - Integrated Cargo commands and diagnostic display
+- **Syntax Highlighting** - Automatic language detection with over 30+ supported languages
 - **Modern Error Handling** - Clear error messages and visual indicators
 
 ## Installation

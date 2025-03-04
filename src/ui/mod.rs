@@ -2,12 +2,13 @@ use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
 use crate::editor::{Editor, Mode};
+use syntect::highlighting::Style as SyntectStyle;
 
 /// Holds information about viewport dimensions that need to be updated
 pub struct ViewportUpdate {
@@ -218,7 +219,7 @@ fn render_editor_area_inner<B: Backend>(
                 tui::text::Span::styled(number_str, number_style)
             ];
             
-            // Add the actual line content with diagnostic highlighting if needed
+            // Add the actual line content with diagnostic or syntax highlighting as needed
             let content = if left_column < line.len() {
                 line[left_column.min(line.len())..].to_string()
             } else {
@@ -228,8 +229,7 @@ fn render_editor_area_inner<B: Backend>(
             // Choose whether to add diagnostic, modification, or diff highlighting
             let current_line = start_line + idx;
             
-            // Line content is now ready to display with appropriate styling
-            
+            // Start with basic styling decisions
             if highlight_modified {
                 if is_diff_mode && is_diff {
                     // In ReloadConfirm mode, highlight the entire diff line in yellow
@@ -305,15 +305,124 @@ fn render_editor_area_inner<B: Backend>(
                         // Add all spans to the line
                         spans.extend(content_spans);
                     } else {
+                        // Apply syntax highlighting if available
+                        if let Some(syntax_ref) = &tab.buffer.syntax {
+                            // Get line for highlighting
+                            let line_for_highlight = if current_line < tab.buffer.lines.len() {
+                                &tab.buffer.lines[current_line]
+                            } else {
+                                ""
+                            };
+                            
+                            // Highlight the line
+                            let highlighted = editor.syntax_highlighter.highlight_text(
+                                &format!("{}\n", line_for_highlight), 
+                                syntax_ref.clone()
+                            );
+                            
+                            if !highlighted.is_empty() {
+                                let line_spans = highlighted[0].ranges.iter()
+                                    .filter_map(|(style, text)| {
+                                        // Skip empty text
+                                        if text.is_empty() { 
+                                            return None; 
+                                        }
+                                        
+                                        // Convert syntect style to tui style
+                                        let tui_style = convert_syntect_style(style);
+                                        
+                                        // Create the span
+                                        Some(Span::styled(text.clone(), tui_style))
+                                    })
+                                    .collect::<Vec<_>>();
+                                
+                                spans.extend(line_spans);
+                            } else {
+                                spans.push(tui::text::Span::raw(content));
+                            }
+                        } else {
+                            spans.push(tui::text::Span::raw(content));
+                        }
+                    }
+                } else {
+                    // Apply syntax highlighting if available
+                    if let Some(syntax_ref) = &tab.buffer.syntax {
+                        // Get line for highlighting
+                        let line_for_highlight = if current_line < tab.buffer.lines.len() {
+                            &tab.buffer.lines[current_line]
+                        } else {
+                            ""
+                        };
+                        
+                        // Highlight the line
+                        let highlighted = editor.syntax_highlighter.highlight_text(
+                            &format!("{}\n", line_for_highlight), 
+                            syntax_ref.clone()
+                        );
+                        
+                        if !highlighted.is_empty() {
+                            let line_spans = highlighted[0].ranges.iter()
+                                .filter_map(|(style, text)| {
+                                    // Skip empty text
+                                    if text.is_empty() { 
+                                        return None; 
+                                    }
+                                    
+                                    // Convert syntect style to tui style
+                                    let tui_style = convert_syntect_style(style);
+                                    
+                                    // Create the span
+                                    Some(Span::styled(text.clone(), tui_style))
+                                })
+                                .collect::<Vec<_>>();
+                            
+                            spans.extend(line_spans);
+                        } else {
+                            spans.push(tui::text::Span::raw(content));
+                        }
+                    } else {
+                        spans.push(tui::text::Span::raw(content));
+                    }
+                }
+            } else {
+                // Apply syntax highlighting if available
+                if let Some(syntax_ref) = &tab.buffer.syntax {
+                    // Get line for highlighting
+                    let line_for_highlight = if current_line < tab.buffer.lines.len() {
+                        &tab.buffer.lines[current_line]
+                    } else {
+                        ""
+                    };
+                    
+                    // Highlight the line
+                    let highlighted = editor.syntax_highlighter.highlight_text(
+                        &format!("{}\n", line_for_highlight), 
+                        syntax_ref.clone()
+                    );
+                    
+                    if !highlighted.is_empty() {
+                        let line_spans = highlighted[0].ranges.iter()
+                            .filter_map(|(style, text)| {
+                                // Skip empty text
+                                if text.is_empty() { 
+                                    return None; 
+                                }
+                                
+                                // Convert syntect style to tui style
+                                let tui_style = convert_syntect_style(style);
+                                
+                                // Create the span
+                                Some(Span::styled(text.clone(), tui_style))
+                            })
+                            .collect::<Vec<_>>();
+                        
+                        spans.extend(line_spans);
+                    } else {
                         spans.push(tui::text::Span::raw(content));
                     }
                 } else {
-                    // No diagnostics, just add the raw content
                     spans.push(tui::text::Span::raw(content));
                 }
-            } else {
-                // No highlighting mode, just add the raw content
-                spans.push(tui::text::Span::raw(content));
             }
             
             Line::from(spans)
@@ -429,6 +538,38 @@ fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: R
     let cursor_pos_y = inner_area.y + 3; // Position at the input line
     
     f.set_cursor(cursor_pos_x, cursor_pos_y);
+}
+
+// Convert syntect style to tui style
+fn convert_syntect_style(style: &SyntectStyle) -> Style {
+    let fg_color = style.foreground;
+    
+    // Convert RGB to a tui Color
+    let r = fg_color.r;
+    let g = fg_color.g;
+    let b = fg_color.b;
+    
+    let fg = if r == 0 && g == 0 && b == 0 {
+        // Default color
+        Color::Reset
+    } else {
+        Color::Rgb(r, g, b)
+    };
+    
+    let mut tui_style = Style::default().fg(fg);
+    
+    // Add font styling if applicable
+    if style.font_style.contains(syntect::highlighting::FontStyle::BOLD) {
+        tui_style = tui_style.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(syntect::highlighting::FontStyle::ITALIC) {
+        tui_style = tui_style.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(syntect::highlighting::FontStyle::UNDERLINE) {
+        tui_style = tui_style.add_modifier(Modifier::UNDERLINED);
+    }
+    
+    tui_style
 }
 
 // Helper function to create a centered rect using percentage of the available space

@@ -4,6 +4,7 @@ mod mode;
 mod file_finder;
 mod viewport;
 mod diagnostics;
+mod syntax;
 
 pub use buffer::Buffer;
 pub use cursor::Cursor;
@@ -11,6 +12,7 @@ pub use mode::Mode;
 pub use file_finder::FileFinder;
 pub use viewport::Viewport;
 pub use diagnostics::{DiagnosticSeverity, DiagnosticCollection};
+pub use syntax::SyntaxHighlighter;
 
 use anyhow::Result;
 use crossterm::event::KeyEvent;
@@ -56,6 +58,7 @@ pub struct Editor {
     pub command_text: String,
     pub filename_prompt_text: String,
     pub diff_lines: HashSet<usize>,
+    pub syntax_highlighter: SyntaxHighlighter,
 }
 
 impl Editor {
@@ -79,6 +82,7 @@ impl Editor {
             command_text: String::new(),
             filename_prompt_text: String::new(),
             diff_lines: HashSet::new(),
+            syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
     
@@ -198,15 +202,43 @@ impl Editor {
     }
 
     pub fn load_file(&mut self, path: &str) -> Result<()> {
-        let tab = self.current_tab_mut();
+        // First load the file
+        let result = {
+            let tab = self.current_tab_mut();
+            let load_result = tab.buffer.load_file(path);
+            
+            // Reset cursor and viewport
+            tab.cursor.x = 0;
+            tab.cursor.y = 0;
+            tab.viewport.top_line = 0;
+            tab.viewport.left_column = 0;
+            
+            load_result
+        };
         
-        let result = tab.buffer.load_file(path);
-        
-        // Reset cursor and viewport
-        tab.cursor.x = 0;
-        tab.cursor.y = 0;
-        tab.viewport.top_line = 0;
-        tab.viewport.left_column = 0;
+        // Then determine syntax if load was successful
+        if result.is_ok() {
+            // Get the information needed for syntax determination
+            let (file_path, first_line) = {
+                let tab = self.current_tab();
+                let file_path = tab.buffer.file_path.clone();
+                let first_line = if !tab.buffer.lines.is_empty() {
+                    tab.buffer.lines[0].clone()
+                } else {
+                    String::new()
+                };
+                (file_path, first_line)
+            };
+            
+            // Determine syntax
+            let syntax = self.syntax_highlighter.determine_syntax(
+                file_path.as_deref(),
+                &first_line
+            );
+            
+            // Set the syntax
+            self.current_tab_mut().buffer.set_syntax(syntax);
+        }
         
         result
     }

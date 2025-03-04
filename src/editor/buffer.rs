@@ -3,12 +3,15 @@ use std::fs;
 use std::collections::HashSet;
 use super::cursor::Cursor;
 use similar::{ChangeTag, TextDiff};
+use syntect::parsing::SyntaxReference;
+use std::sync::Arc;
 
 pub struct Buffer {
     pub lines: Vec<String>,
     pub file_path: Option<String>,
     pub modified_lines: HashSet<usize>,
     pub is_modified: bool,
+    pub syntax: Option<Arc<SyntaxReference>>,
 }
 
 impl Buffer {
@@ -18,7 +21,13 @@ impl Buffer {
             file_path: None,
             modified_lines: HashSet::new(),
             is_modified: false,
+            syntax: None,
         }
+    }
+    
+    /// Set the syntax for this buffer
+    pub fn set_syntax(&mut self, syntax: Option<Arc<SyntaxReference>>) {
+        self.syntax = syntax;
     }
 
     pub fn load_file(&mut self, path: &str) -> Result<()> {
