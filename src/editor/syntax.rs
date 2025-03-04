@@ -5,6 +5,7 @@ use syntect::highlighting::{ThemeSet, Style};
 use syntect::parsing::{SyntaxSet, SyntaxReference};
 use syntect::util::LinesWithEndings;
 use std::sync::Arc;
+use std::hash::{Hash, Hasher};
 
 /// Manages syntax highlighting
 pub struct SyntaxHighlighter {
@@ -16,6 +17,40 @@ pub struct SyntaxHighlighter {
 #[derive(Clone)]
 pub struct HighlightedLine {
     pub ranges: Vec<(Style, String)>,
+}
+
+impl Eq for HighlightedLine {}
+
+impl PartialEq for HighlightedLine {
+    fn eq(&self, other: &Self) -> bool {
+        if self.ranges.len() != other.ranges.len() {
+            return false;
+        }
+        for (i, (style, text)) in self.ranges.iter().enumerate() {
+            let (other_style, other_text) = &other.ranges[i];
+            // Compare text content first as it's a quicker check
+            if text != other_text {
+                return false;
+            }
+            // Then compare styles
+            if style.foreground.r != other_style.foreground.r || 
+               style.foreground.g != other_style.foreground.g ||
+               style.foreground.b != other_style.foreground.b ||
+               style.font_style != other_style.font_style {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl Hash for HighlightedLine {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash the line content for cache lookups
+        for (_, text) in &self.ranges {
+            text.hash(state);
+        }
+    }
 }
 
 impl SyntaxHighlighter {

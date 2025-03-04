@@ -7,7 +7,8 @@ use tui::{
     Frame,
 };
 
-use crate::editor::{Editor, Mode};
+use crate::editor::{Editor, Mode, HighlightedLine};
+use std::collections::HashMap;
 use syntect::highlighting::Style as SyntectStyle;
 
 /// Holds information about viewport dimensions that need to be updated
@@ -16,7 +17,7 @@ pub struct ViewportUpdate {
     pub height: usize,
 }
 
-pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) -> Option<ViewportUpdate> {
+pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<ViewportUpdate> {
     let size = f.size();
     let mut viewport_update = None;
 
@@ -155,11 +156,15 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
 // Common rendering function that can optionally highlight modified or diff lines
 fn render_editor_area_inner<B: Backend>(
     f: &mut Frame<B>, 
-    editor: &Editor, 
+    editor: &mut Editor, 
     area: Rect, 
     highlight_modified: bool,
     is_diff_mode: bool
 ) -> Option<ViewportUpdate> {
+    // Create a cache for highlighted lines
+    let mut highlight_cache = HashMap::new();
+    std::mem::swap(&mut highlight_cache, &mut editor.highlighted_lines_cache);
+    
     // Get the current tab
     let tab = editor.current_tab();
     
@@ -314,11 +319,25 @@ fn render_editor_area_inner<B: Backend>(
                                 ""
                             };
                             
-                            // Highlight the line
-                            let highlighted = editor.syntax_highlighter.highlight_text(
-                                &format!("{}\n", line_for_highlight), 
-                                syntax_ref.clone()
-                            );
+                            // Use the cache to avoid recomputing syntax highlights
+                            let tab_idx = editor.current_tab;
+                            let cache_key = (tab_idx, current_line);
+                            
+                            // Get or compute the highlighted line
+                            let highlighted = if let Some(cached) = highlight_cache.get(&cache_key) {
+                                cached.clone()
+                            } else {
+                                // Highlight the line
+                                let highlighted = editor.syntax_highlighter.highlight_text(
+                                    &format!("{}\n", line_for_highlight), 
+                                    syntax_ref.clone()
+                                );
+                                
+                                // Store for later caching
+                                let result = highlighted.clone();
+                                highlight_cache.insert(cache_key, result);
+                                highlighted
+                            };
                             
                             if !highlighted.is_empty() {
                                 let line_spans = highlighted[0].ranges.iter()
@@ -354,28 +373,29 @@ fn render_editor_area_inner<B: Backend>(
                             ""
                         };
                         
-                        // Highlight the line
-                        let highlighted = editor.syntax_highlighter.highlight_text(
-                            &format!("{}\n", line_for_highlight), 
-                            syntax_ref.clone()
-                        );
+                        // Use the cache to avoid recomputing syntax highlights
+                        let tab_idx = editor.current_tab;
+                        let cache_key = (tab_idx, current_line);
                         
-                        if !highlighted.is_empty() {
-                            let line_spans = highlighted[0].ranges.iter()
-                                .filter_map(|(style, text)| {
-                                    // Skip empty text
-                                    if text.is_empty() { 
-                                        return None; 
-                                    }
-                                    
-                                    // Convert syntect style to tui style
-                                    let tui_style = convert_syntect_style(style);
-                                    
-                                    // Create the span
-                                    Some(Span::styled(text.clone(), tui_style))
-                                })
-                                .collect::<Vec<_>>();
+                        // Get or compute the highlighted line
+                        let highlighted = if let Some(cached) = highlight_cache.get(&cache_key) {
+                            cached.clone()
+                        } else {
+                            // Highlight the line
+                            let highlighted = editor.syntax_highlighter.highlight_text(
+                                &format!("{}\n", line_for_highlight), 
+                                syntax_ref.clone()
+                            );
                             
+                            // Store for later caching
+                            let result = highlighted.clone();
+                            highlight_cache.insert(cache_key, result);
+                            highlighted
+                        };
+                        
+                        // Use the helper function to create highlighted spans
+                        let line_spans = create_highlighted_spans(&highlighted);
+                        if !line_spans.is_empty() {
                             spans.extend(line_spans);
                         } else {
                             spans.push(tui::text::Span::raw(content));
@@ -394,28 +414,29 @@ fn render_editor_area_inner<B: Backend>(
                         ""
                     };
                     
-                    // Highlight the line
-                    let highlighted = editor.syntax_highlighter.highlight_text(
-                        &format!("{}\n", line_for_highlight), 
-                        syntax_ref.clone()
-                    );
+                    // Use the cache to avoid recomputing syntax highlights
+                    let tab_idx = editor.current_tab;
+                    let cache_key = (tab_idx, current_line);
                     
-                    if !highlighted.is_empty() {
-                        let line_spans = highlighted[0].ranges.iter()
-                            .filter_map(|(style, text)| {
-                                // Skip empty text
-                                if text.is_empty() { 
-                                    return None; 
-                                }
-                                
-                                // Convert syntect style to tui style
-                                let tui_style = convert_syntect_style(style);
-                                
-                                // Create the span
-                                Some(Span::styled(text.clone(), tui_style))
-                            })
-                            .collect::<Vec<_>>();
+                    // Get or compute the highlighted line
+                    let highlighted = if let Some(cached) = highlight_cache.get(&cache_key) {
+                        cached.clone()
+                    } else {
+                        // Highlight the line
+                        let highlighted = editor.syntax_highlighter.highlight_text(
+                            &format!("{}\n", line_for_highlight), 
+                            syntax_ref.clone()
+                        );
                         
+                        // Store for later caching
+                        let result = highlighted.clone();
+                        highlight_cache.insert(cache_key, result);
+                        highlighted
+                    };
+                    
+                    // Use the helper function to create highlighted spans
+                    let line_spans = create_highlighted_spans(&highlighted);
+                    if !line_spans.is_empty() {
                         spans.extend(line_spans);
                     } else {
                         spans.push(tui::text::Span::raw(content));
@@ -450,6 +471,9 @@ fn render_editor_area_inner<B: Backend>(
         area.y + cursor_y as u16 + 1, // +1 for the border
     );
     
+    // Restore the cache
+    std::mem::swap(&mut highlight_cache, &mut editor.highlighted_lines_cache);
+    
     // Return viewport dimensions for safe update
     Some(ViewportUpdate {
         width: viewport.width,
@@ -457,15 +481,15 @@ fn render_editor_area_inner<B: Backend>(
     })
 }
 
-fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &mut Editor, area: Rect) -> Option<ViewportUpdate> {
     render_editor_area_inner(f, editor, area, false, false)
 }
 
-fn render_editor_area_with_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect, is_reload_mode: bool) -> Option<ViewportUpdate> {
+fn render_editor_area_with_highlights<B: Backend>(f: &mut Frame<B>, editor: &mut Editor, area: Rect, is_reload_mode: bool) -> Option<ViewportUpdate> {
     render_editor_area_inner(f, editor, area, true, is_reload_mode)
 }
 
-fn render_editor_area_with_diff_highlights<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
+fn render_editor_area_with_diff_highlights<B: Backend>(f: &mut Frame<B>, editor: &mut Editor, area: Rect) -> Option<ViewportUpdate> {
     render_editor_area_inner(f, editor, area, true, true)
 }
 
@@ -540,7 +564,10 @@ fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: R
     f.set_cursor(cursor_pos_x, cursor_pos_y);
 }
 
-// Convert syntect style to tui style
+/// Convert syntect style to tui style
+/// 
+/// This function converts a style from the syntect library into a style 
+/// compatible with tui-rs for rendering in the terminal.
 fn convert_syntect_style(style: &SyntectStyle) -> Style {
     let fg_color = style.foreground;
     
@@ -570,6 +597,31 @@ fn convert_syntect_style(style: &SyntectStyle) -> Style {
     }
     
     tui_style
+}
+
+/// Creates line spans from highlighted text
+/// 
+/// This helper function extracts the common pattern of converting highlighted text
+/// into tui-compatible spans, improving code maintainability.
+fn create_highlighted_spans(highlighted: &[HighlightedLine]) -> Vec<Span<'static>> {
+    if highlighted.is_empty() {
+        return vec![];
+    }
+    
+    highlighted[0].ranges.iter()
+        .filter_map(|(style, text)| {
+            // Skip empty text
+            if text.is_empty() { 
+                return None; 
+            }
+            
+            // Convert syntect style to tui style
+            let tui_style = convert_syntect_style(style);
+            
+            // Create the span with cloned text to avoid reference issues
+            Some(Span::styled(text.clone(), tui_style))
+        })
+        .collect()
 }
 
 // Helper function to create a centered rect using percentage of the available space

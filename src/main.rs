@@ -34,7 +34,7 @@ fn run_app(
         // Draw UI and collect any viewport updates
         let mut viewport_update = None;
         terminal.draw(|f| {
-            viewport_update = ui::render(f, &editor);
+            viewport_update = ui::render(f, &mut editor);
         })?;
         
         // Apply viewport updates if needed (safely updates viewport dimensions)

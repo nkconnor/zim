@@ -30,38 +30,36 @@ impl Buffer {
         self.syntax = syntax;
     }
 
+    /// Load a file into the buffer with optimized line handling
+    /// 
+    /// This implementation uses Rust's built-in line iterator for more readable
+    /// and potentially more efficient line handling.
     pub fn load_file(&mut self, path: &str) -> Result<()> {
-        // Read the file content as is - don't auto-split into lines
+        // Read the file content
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read file: {}", path))?;
         
-        // Start fresh with no lines
-        self.lines = Vec::new();
+        // Calculate an approximate capacity to reduce reallocations
+        // Assume average of 40 chars per line as a heuristic
+        let estimated_line_count = content.len() / 40 + 1;
         
-        // Simply split the content by newlines and handle the last line specially
+        // Start fresh with pre-allocated lines vector
+        self.lines = Vec::with_capacity(estimated_line_count);
+        
+        // Handle empty file case
         if content.is_empty() {
-            // Empty file - add a single empty line
             self.lines.push(String::new());
         } else {
-            // Split at each newline, keeping track of positions
-            let mut start = 0;
-            
-            // Process each line including the last one
-            for (i, c) in content.char_indices() {
-                if c == '\n' {
-                    // Add the line up to the newline (but not including it)
-                    self.lines.push(content[start..i].to_string());
-                    start = i + 1; // Start the next line after the newline
-                }
+            // Use lines() iterator which properly handles different line endings
+            // and is more readable than manual character iteration
+            for line in content.lines() {
+                self.lines.push(line.to_string());
             }
             
-            // Add the last line (after the last newline, or the only line if no newlines)
-            if start <= content.len() {
-                self.lines.push(content[start..].to_string());
+            // If the file ends with a newline, add an empty line at the end
+            if content.ends_with('\n') {
+                self.lines.push(String::new());
             }
-            
-            // If the file ends with a newline, the last line should be empty
-            // The loop above would have added an empty string already
         }
         
         // Store the file path
@@ -85,7 +83,14 @@ impl Buffer {
 
         let line = &mut self.lines[cursor.y];
         
+        // Reserve space if we're going to grow the line
         if cursor.x > line.len() {
+            // Pre-allocate line capacity for better performance
+            let needed_capacity = cursor.x + 1;
+            if line.capacity() < needed_capacity {
+                line.reserve(needed_capacity - line.len());
+            }
+            
             // Pad with spaces if cursor is beyond the end of the line
             while cursor.x > line.len() {
                 line.push(' ');
@@ -162,13 +167,20 @@ impl Buffer {
     }
     
     /// Get the entire content of the buffer as a single string
+    /// 
+    /// This implementation is optimized to minimize allocations by pre-calculating
+    /// the exact string capacity needed.
     pub fn get_content(&self) -> String {
         if self.lines.is_empty() {
             return String::new();
         }
         
-        // Build the content manually with proper newline handling
-        let mut content = String::new();
+        // Calculate required capacity to avoid reallocations
+        // (sum of all line lengths + newlines for each line except the last)
+        let capacity = self.lines.iter().map(|line| line.len()).sum::<usize>() + self.lines.len() - 1;
+        
+        // Initialize with exact needed capacity
+        let mut content = String::with_capacity(capacity);
         
         // Add all lines except the last one with newlines
         for i in 0..self.lines.len()-1 {

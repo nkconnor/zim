@@ -12,12 +12,59 @@ pub use mode::Mode;
 pub use file_finder::FileFinder;
 pub use viewport::Viewport;
 pub use diagnostics::{DiagnosticSeverity, DiagnosticCollection};
-pub use syntax::SyntaxHighlighter;
+pub use syntax::{SyntaxHighlighter, HighlightedLine};
 
 use anyhow::Result;
 use crossterm::event::KeyEvent;
 use crate::config::Config;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
+
+/// Represents a command that can be executed in the editor
+/// 
+/// This enum implements a command pattern for editor operations,
+/// making it easier to map key bindings to actions and to
+/// reuse common operations throughout the code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCommand {
+    // File operations
+    SaveFile,
+    ReloadFile,
+    SaveAndQuit,
+    Quit,
+    
+    // Mode switching
+    EnterNormalMode,
+    EnterInsertMode,
+    EnterCommandMode,
+    EnterFileFinder,
+    ShowHelp,
+    
+    // Navigation
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    MoveToLineStart,
+    MoveToLineEnd,
+    MoveToFileStart,
+    MoveToFileEnd,
+    PageUp,
+    PageDown,
+    
+    // Tab operations
+    NewTab,
+    CloseTab,
+    NextTab,
+    PrevTab,
+    GotoTab(usize),
+    
+    // Rust integration
+    RunCargoCheck,
+    RunCargoClippy,
+    
+    // No operation
+    Noop,
+}
 
 /// Represents an editor tab with its own buffer, cursor, and viewport
 pub struct Tab {
@@ -59,6 +106,8 @@ pub struct Editor {
     pub filename_prompt_text: String,
     pub diff_lines: HashSet<usize>,
     pub syntax_highlighter: SyntaxHighlighter,
+    /// Cache of highlighted lines to avoid recomputing syntax highlighting on every render
+    pub highlighted_lines_cache: HashMap<(usize, usize), Vec<HighlightedLine>>,
 }
 
 impl Editor {
@@ -83,7 +132,13 @@ impl Editor {
             filename_prompt_text: String::new(),
             diff_lines: HashSet::new(),
             syntax_highlighter: SyntaxHighlighter::new(),
+            highlighted_lines_cache: HashMap::new(),
         }
+    }
+    
+    /// Invalidate the syntax highlighting cache when a buffer is modified
+    pub fn invalidate_highlight_cache(&mut self) {
+        self.highlighted_lines_cache.clear();
     }
     
     /// Get a reference to the current tab
@@ -143,57 +198,76 @@ impl Editor {
         }
     }
     
-    /// Run cargo check and parse the diagnostics
-    pub fn run_cargo_check(&mut self, cargo_dir: &str) -> Result<()> {
-        use std::process::Command;
-        
-        // Get the current file path for diagnostic scoping
-        let current_file = match &self.current_tab_mut().buffer.file_path {
-            Some(path) => path.clone(),
-            None => return Ok(()) // Can't run diagnostics without a file
-        };
-        
-        // Run cargo check
-        let output = Command::new("cargo")
-            .arg("check")
-            .arg("--message-format=human")
-            .current_dir(cargo_dir)
-            .output()?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        
-        // Parse the diagnostics, scoping to the current file
-        self.current_tab_mut().diagnostics.parse_cargo_output(&format!("{}\n{}", stdout, stderr), &current_file);
-        
-        Ok(())
-    }
+    /// Execute a cargo command and process its diagnostics
+/// 
+/// This is a general-purpose function that can run any cargo command
+/// and parse its output for diagnostics. It reduces code duplication.
+pub fn run_cargo_command(&mut self, cargo_dir: &str, command: &str) -> Result<()> {
+    use std::process::Command;
     
-    /// Run cargo clippy and parse the diagnostics
-    pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
-        use std::process::Command;
-        
-        // Get the current file path for diagnostic scoping
-        let current_file = match &self.current_tab_mut().buffer.file_path {
-            Some(path) => path.clone(),
-            None => return Ok(()) // Can't run diagnostics without a file
-        };
-        
-        // Run cargo clippy
-        let output = Command::new("cargo")
-            .arg("clippy")
-            .arg("--message-format=human")
-            .current_dir(cargo_dir)
-            .output()?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        
-        // Parse the diagnostics, scoping to the current file
-        self.current_tab_mut().diagnostics.parse_cargo_output(&format!("{}\n{}", stdout, stderr), &current_file);
-        
-        Ok(())
+    // Get the current file path for diagnostic scoping
+    let current_file = match &self.current_tab_mut().buffer.file_path {
+        Some(path) => path.clone(),
+        None => return Ok(()) // Can't run diagnostics without a file
+    };
+    
+    // Run the cargo command
+    let output = Command::new("cargo")
+        .arg(command)
+        .arg("--message-format=human")
+        .current_dir(cargo_dir)
+        .output()?;
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    // Parse the diagnostics, scoping to the current file
+    self.current_tab_mut().diagnostics.parse_cargo_output(&format!("{}\n{}", stdout, stderr), &current_file);
+    
+    Ok(())
+}
+
+/// Run cargo check and parse the diagnostics
+///
+/// This function runs the `cargo check` command in the specified directory
+/// and parses any diagnostics (errors, warnings) that are produced,
+/// associating them with the current file.
+/// 
+/// # Arguments
+/// 
+/// * `cargo_dir` - The directory where cargo should be run
+/// 
+/// # Returns
+/// 
+/// * `Result<()>` - Ok if the command succeeds, or an error if it fails
+pub fn run_cargo_check(&mut self, cargo_dir: &str) -> Result<()> {
+    if let Err(e) = self.run_cargo_command(cargo_dir, "check") {
+        // Provide a more user-friendly error message
+        return Err(anyhow::anyhow!("Failed to run cargo check: {}", e));
     }
+    Ok(())
+}
+
+/// Run cargo clippy and parse the diagnostics
+///
+/// This function runs the `cargo clippy` command in the specified directory
+/// and parses any lints (style warnings, suggestions) that are produced,
+/// associating them with the current file.
+/// 
+/// # Arguments
+/// 
+/// * `cargo_dir` - The directory where cargo should be run
+/// 
+/// # Returns
+/// 
+/// * `Result<()>` - Ok if the command succeeds, or an error if it fails
+pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
+    if let Err(e) = self.run_cargo_command(cargo_dir, "clippy") {
+        // Provide a more user-friendly error message
+        return Err(anyhow::anyhow!("Failed to run cargo clippy: {}", e));
+    }
+    Ok(())
+}
     
     // Update the viewport if cursor moves out of the visible area
     pub fn update_viewport(&mut self) {
@@ -798,6 +872,8 @@ impl Editor {
                 tab.buffer.insert_char_at_cursor(c, &tab.cursor);
                 tab.cursor.move_right(&tab.buffer);
                 self.update_viewport();
+                // Invalidate syntax highlighting cache for the modified line
+                self.invalidate_highlight_cache();
             }
             KeyCode::Backspace => {
                 let tab = self.current_tab_mut();
@@ -805,6 +881,8 @@ impl Editor {
                     tab.cursor.move_left(&tab.buffer);
                     tab.buffer.delete_char_at_cursor(&tab.cursor);
                     self.update_viewport();
+                    // Invalidate syntax highlighting cache for the modified line
+                    self.invalidate_highlight_cache();
                 }
             }
             KeyCode::Enter => {
@@ -813,6 +891,8 @@ impl Editor {
                 tab.cursor.x = 0;
                 tab.cursor.y += 1;
                 self.update_viewport();
+                // Invalidate syntax highlighting cache for the modified lines
+                self.invalidate_highlight_cache();
             }
             _ => {}
         }
