@@ -637,8 +637,8 @@ fn render_editor_area_inner<B: Backend>(
     let cursor_y = tab.cursor.y.saturating_sub(viewport.top_line);
     
     // Adjust cursor position for line numbers
-    // Add the number width to the cursor x position
-    let line_number_offset = line_num_width + 1; // width + space
+    // Add the number width to the cursor x position, plus 1 for the diagnostic indicator
+    let line_number_offset = line_num_width + 2; // width + space + indicator
     
     f.set_cursor(
         area.x + cursor_x as u16 + line_number_offset as u16 + 1, // +1 for the border
@@ -948,7 +948,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
     let cursor_y = tab.cursor.y.saturating_sub(viewport.top_line);
     
     // Adjust cursor position for line numbers
-    let line_number_offset = line_num_width + 1; // width + space
+    let line_number_offset = line_num_width + 2; // width + space + indicator
     
     f.set_cursor(
         area.x + cursor_x as u16 + line_number_offset as u16 + 1, // +1 for the border
@@ -1998,7 +1998,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::FileFinder => "FILE FINDER".to_string(),
         Mode::TokenSearch => format!("TOKEN SEARCH: {}", editor.token_search.query),
         Mode::Help => "HELP".to_string(),
-        Mode::WriteConfirm => "WRITE? (y/n/q)".to_string(),
+        Mode::WriteConfirm => "WRITE? (y/n/q/a)".to_string(),
         Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
         Mode::FilenamePrompt => format!("FILENAME: {}", editor.filename_prompt_text),
         Mode::DiagnosticsPanel => "DIAGNOSTICS".to_string(),
@@ -2038,7 +2038,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             // Count modified lines
             let modified_line_count = editor.current_tab().buffer.get_modified_lines().len();
             
-            format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel, Q to quit without saving", 
+            format!("{} | Save file: {} | {} modified lines | Press Y to confirm, N to cancel, Q to quit without saving, A to save all tabs", 
                 mode_text, file_info, modified_line_count)
         },
         Mode::ReloadConfirm => {

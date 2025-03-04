@@ -2062,28 +2062,40 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     "cancel" => self.mode = Mode::Normal,
                     "select" => {
                         if let Some(file_path) = self.file_finder.get_selected() {
-                            // KEY FIX: Use load_file_in_new_tab to ensure clean state
                             if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
-                                // Load in a new tab if Ctrl is pressed
+                                // Always use load_file_in_new_tab which has built-in duplicate detection
+                                // If the file is already open, it will switch to that tab instead
                                 self.load_file_in_new_tab(&file_path)?;
                             } else {
-                                // Load in current tab, but make sure it's clean first
+                                // Check if current tab is empty and unused
                                 let current_tab = self.current_tab;
-                                
-                                // Check if current tab is modified or has content
-                                let need_new_tab = {
+                                let current_tab_empty = {
                                     let tab = &self.tabs[current_tab];
-                                    tab.buffer.is_modified || 
-                                        (!tab.buffer.lines.is_empty() && 
-                                         !(tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty()))
+                                    !tab.buffer.is_modified && 
+                                        (tab.buffer.lines.is_empty() || 
+                                         (tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty())) &&
+                                        tab.buffer.file_path.is_none()
                                 };
                                 
-                                if need_new_tab {
-                                    // Create new tab for the file
-                                    self.load_file_in_new_tab(&file_path)?;
-                                } else {
-                                    // Use current tab
-                                    self.load_file(&file_path)?;
+                                // Always use load_file_in_new_tab which has built-in duplicate detection
+                                // This either switches to an existing tab with this file or loads it in a new tab
+                                self.load_file_in_new_tab(&file_path)?;
+                                
+                                // If the current tab was empty and we created a new tab, close the empty one
+                                if current_tab_empty && self.current_tab != current_tab && self.tabs.len() > 1 {
+                                    // Store the new tab index
+                                    let new_tab = self.current_tab;
+                                    
+                                    // Close the empty tab
+                                    self.current_tab = current_tab;
+                                    self.close_tab();
+                                    
+                                    // Adjust new tab index if necessary
+                                    if new_tab > current_tab {
+                                        self.current_tab = new_tab - 1;
+                                    } else {
+                                        self.current_tab = new_tab;
+                                    }
                                 }
                             }
                             self.mode = Mode::Normal;
@@ -2103,28 +2115,40 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
                 if let Some(file_path) = self.file_finder.get_selected() {
-                    // KEY FIX: Use load_file_in_new_tab to ensure clean state
                     if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
-                        // Load in a new tab if Ctrl is pressed
+                        // Always use load_file_in_new_tab which has built-in duplicate detection
+                        // If the file is already open, it will switch to that tab instead
                         self.load_file_in_new_tab(&file_path)?;
                     } else {
-                        // Load in current tab, but make sure it's clean first
+                        // Check if current tab is empty and unused
                         let current_tab = self.current_tab;
-                        
-                        // Check if current tab is modified or has content
-                        let need_new_tab = {
+                        let current_tab_empty = {
                             let tab = &self.tabs[current_tab];
-                            tab.buffer.is_modified || 
-                                (!tab.buffer.lines.is_empty() && 
-                                 !(tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty()))
+                            !tab.buffer.is_modified && 
+                                (tab.buffer.lines.is_empty() || 
+                                 (tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty())) &&
+                                tab.buffer.file_path.is_none()
                         };
                         
-                        if need_new_tab {
-                            // Create new tab for the file
-                            self.load_file_in_new_tab(&file_path)?;
-                        } else {
-                            // Use current tab
-                            self.load_file(&file_path)?;
+                        // Always use load_file_in_new_tab which has built-in duplicate detection
+                        // This either switches to an existing tab with this file or loads it in a new tab
+                        self.load_file_in_new_tab(&file_path)?;
+                        
+                        // If the current tab was empty and we created a new tab, close the empty one
+                        if current_tab_empty && self.current_tab != current_tab && self.tabs.len() > 1 {
+                            // Store the new tab index
+                            let new_tab = self.current_tab;
+                            
+                            // Close the empty tab
+                            self.current_tab = current_tab;
+                            self.close_tab();
+                            
+                            // Adjust new tab index if necessary
+                            if new_tab > current_tab {
+                                self.current_tab = new_tab - 1;
+                            } else {
+                                self.current_tab = new_tab;
+                            }
                         }
                     }
                     self.mode = Mode::Normal;
