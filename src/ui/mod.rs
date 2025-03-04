@@ -599,7 +599,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                                         if current_selected {
                                             selected_spans.push(tui::text::Span::styled(
                                                 segment.to_string(),
-                                                Style::default().bg(Color::Blue).fg(Color::White)
+                                                Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
                                             ));
                                         } else {
                                             selected_spans.push(tui::text::Span::raw(segment.to_string()));
@@ -616,7 +616,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                                 if current_selected {
                                     selected_spans.push(tui::text::Span::styled(
                                         segment.to_string(),
-                                        Style::default().bg(Color::Blue).fg(Color::White)
+                                        Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
                                     ));
                                 } else {
                                     selected_spans.push(tui::text::Span::raw(segment.to_string()));
@@ -668,7 +668,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                                     if segment_start < i {
                                         let segment = &diagnostic_text[segment_start..i];
                                         let style = if current_selected {
-                                            diagnostic_style.patch(Style::default().bg(Color::Blue))
+                                            diagnostic_style.patch(Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD))
                                         } else {
                                             diagnostic_style
                                         };
@@ -683,7 +683,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                             if segment_start < diagnostic_text.len() {
                                 let segment = &diagnostic_text[segment_start..];
                                 let style = if current_selected {
-                                    diagnostic_style.patch(Style::default().bg(Color::Blue))
+                                    diagnostic_style.patch(Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD))
                                 } else {
                                     diagnostic_style
                                 };
@@ -724,7 +724,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                                     if current_selected {
                                         selected_spans.push(tui::text::Span::styled(
                                             segment.to_string(),
-                                            Style::default().bg(Color::Blue).fg(Color::White)
+                                            Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
                                         ));
                                     } else {
                                         selected_spans.push(tui::text::Span::raw(segment.to_string()));
@@ -741,7 +741,7 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
                             if current_selected {
                                 selected_spans.push(tui::text::Span::styled(
                                     segment.to_string(),
-                                    Style::default().bg(Color::Blue).fg(Color::White)
+                                    Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
                                 ));
                             } else {
                                 selected_spans.push(tui::text::Span::raw(segment.to_string()));
@@ -873,7 +873,7 @@ fn add_syntax_or_selection_spans(spans: &mut Vec<tui::text::Span<'static>>,
                                     // Selected - use base style but with selection background
                                     segments.push(tui::text::Span::styled(
                                         segment.to_string(),
-                                        tui_style.patch(Style::default().bg(Color::Blue))
+                                        tui_style.patch(Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD))
                                     ));
                                 } else {
                                     // Not selected - use base syntax style
@@ -894,7 +894,7 @@ fn add_syntax_or_selection_spans(spans: &mut Vec<tui::text::Span<'static>>,
                         if current_selected {
                             segments.push(tui::text::Span::styled(
                                 segment.to_string(),
-                                tui_style.patch(Style::default().bg(Color::Blue))
+                                tui_style.patch(Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD))
                             ));
                         } else {
                             segments.push(tui::text::Span::styled(
@@ -951,7 +951,7 @@ fn add_selection_only_spans(spans: &mut Vec<tui::text::Span<'static>>,
                 if current_selected {
                     segments.push(tui::text::Span::styled(
                         segment.to_string(),
-                        Style::default().bg(Color::Blue).fg(Color::White)
+                        Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
                     ));
                 } else {
                     segments.push(tui::text::Span::raw(segment.to_string()));
@@ -968,7 +968,7 @@ fn add_selection_only_spans(spans: &mut Vec<tui::text::Span<'static>>,
         if current_selected {
             segments.push(tui::text::Span::styled(
                 segment.to_string(),
-                Style::default().bg(Color::Blue).fg(Color::White)
+                Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD)
             ));
         } else {
             segments.push(tui::text::Span::raw(segment.to_string()));
@@ -1482,7 +1482,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     };
     
     let status_bar = Paragraph::new(status)
-        .style(Style::default().bg(Color::Blue).fg(Color::White));
+        .style(Style::default().bg(Color::LightBlue).fg(Color::Black).add_modifier(Modifier::BOLD));
     
     f.render_widget(status_bar, area);
 }

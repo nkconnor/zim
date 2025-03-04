@@ -108,6 +108,8 @@ pub struct Editor {
     pub syntax_highlighter: SyntaxHighlighter,
     /// Cache of highlighted lines to avoid recomputing syntax highlighting on every render
     pub highlighted_lines_cache: HashMap<(usize, usize), Vec<HighlightedLine>>,
+    /// Clipboard for storing yanked/copied text
+    pub clipboard: String,
 }
 
 impl Editor {
@@ -133,6 +135,7 @@ impl Editor {
             diff_lines: HashSet::new(),
             syntax_highlighter: SyntaxHighlighter::new(),
             highlighted_lines_cache: HashMap::new(),
+            clipboard: String::new(),
         }
     }
     
@@ -342,7 +345,35 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         self.mode = Mode::Normal;
                         Ok(true)
                     },
-                    // Add support for key handling in visual mode
+                    // Delete selection
+                    KeyCode::Char('d') => {
+                        let is_deleted = {
+                            let tab = self.current_tab_mut();
+                            tab.buffer.delete_selection(&mut tab.cursor, false)
+                        };
+                        if is_deleted {
+                            self.invalidate_highlight_cache();
+                        }
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    // Yank (copy) selection
+                    KeyCode::Char('y') => {
+                        // Get selected text
+                        let selected_text = {
+                            let tab = self.current_tab();
+                            tab.buffer.get_selected_text(&tab.cursor, false)
+                        };
+                        
+                        // Store in clipboard
+                        self.clipboard = selected_text;
+                        
+                        // Clear selection and return to normal mode
+                        self.current_tab_mut().buffer.clear_selection();
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    // Add support for other key handling in visual mode
                     _ => self.handle_normal_mode(key),
                 }
             },
@@ -355,7 +386,35 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         self.mode = Mode::Normal;
                         Ok(true)
                     },
-                    // Add support for key handling in visual line mode
+                    // Delete selection
+                    KeyCode::Char('d') => {
+                        let is_deleted = {
+                            let tab = self.current_tab_mut();
+                            tab.buffer.delete_selection(&mut tab.cursor, true)
+                        };
+                        if is_deleted {
+                            self.invalidate_highlight_cache();
+                        }
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    // Yank (copy) selection
+                    KeyCode::Char('y') => {
+                        // Get selected text
+                        let selected_text = {
+                            let tab = self.current_tab();
+                            tab.buffer.get_selected_text(&tab.cursor, true)
+                        };
+                        
+                        // Store in clipboard
+                        self.clipboard = selected_text;
+                        
+                        // Clear selection and return to normal mode
+                        self.current_tab_mut().buffer.clear_selection();
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    // Add support for other key handling in visual line mode
                     _ => self.handle_normal_mode(key),
                 }
             },
@@ -815,6 +874,128 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::FileFinder;
                 self.file_finder.refresh()?;
+            },
+            // Paste clipboard after cursor (p key)
+            KeyCode::Char('p') if !key.modifiers.contains(KeyModifiers::CONTROL) && 
+                                   !key.modifiers.contains(KeyModifiers::ALT) && 
+                                   !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if !self.clipboard.is_empty() {
+                    // Clone the clipboard content to avoid borrowing issues
+                    let clipboard_content = self.clipboard.clone();
+                    let ends_with_newline = clipboard_content.ends_with('\n');
+                    
+                    let tab = self.current_tab_mut();
+                    let cursor_y = tab.cursor.y;
+                    
+                    // Check if clipboard ends with newline to determine paste style
+                    if ends_with_newline {
+                        // Paste on new line below current line
+                        // First, find the last character of the current line
+                        tab.cursor.move_to_line_end(&tab.buffer);
+                        
+                        // Insert a newline
+                        tab.buffer.insert_newline_at_cursor(&tab.cursor);
+                        
+                        // Move to the beginning of the new line
+                        tab.cursor.y += 1;
+                        tab.cursor.x = 0;
+                        
+                        // Calculate clipboard lines
+                        let clipboard_lines: Vec<&str> = clipboard_content.lines().collect();
+                        
+                        // Insert each line from the clipboard
+                        for (i, line) in clipboard_lines.iter().enumerate() {
+                            // Insert the line content
+                            for c in line.chars() {
+                                tab.buffer.insert_char_at_cursor(c, &tab.cursor);
+                                tab.cursor.x += 1;
+                            }
+                            
+                            // If not the last line, add a newline
+                            if i < clipboard_lines.len() - 1 {
+                                tab.buffer.insert_newline_at_cursor(&tab.cursor);
+                                tab.cursor.y += 1;
+                                tab.cursor.x = 0;
+                            }
+                        }
+                        
+                        // Position cursor at the start of the first pasted line
+                        tab.cursor.y = cursor_y + 1;
+                        tab.cursor.x = 0;
+                    } else {
+                        // Paste inline after cursor
+                        for c in clipboard_content.chars() {
+                            tab.buffer.insert_char_at_cursor(c, &tab.cursor);
+                            tab.cursor.x += 1;
+                        }
+                    }
+                    
+                    self.update_viewport();
+                    self.invalidate_highlight_cache();
+                }
+            },
+            // Paste clipboard before cursor (P key)
+            KeyCode::Char('P') if !key.modifiers.contains(KeyModifiers::CONTROL) && 
+                                   !key.modifiers.contains(KeyModifiers::ALT) => {
+                if !self.clipboard.is_empty() {
+                    // Clone the clipboard content to avoid borrowing issues
+                    let clipboard_content = self.clipboard.clone();
+                    let ends_with_newline = clipboard_content.ends_with('\n');
+                    
+                    let tab = self.current_tab_mut();
+                    let cursor_y = tab.cursor.y;
+                    let cursor_x = tab.cursor.x;
+                    
+                    // Check if clipboard ends with newline to determine paste style
+                    if ends_with_newline {
+                        // Paste on new line above current line
+                        // First, move to the beginning of the current line
+                        tab.cursor.x = 0;
+                        
+                        // Calculate clipboard lines
+                        let clipboard_lines: Vec<&str> = clipboard_content.lines().collect();
+                        
+                        // Insert each line from the clipboard
+                        for (i, line) in clipboard_lines.iter().enumerate() {
+                            // Insert the line content
+                            for c in line.chars() {
+                                tab.buffer.insert_char_at_cursor(c, &tab.cursor);
+                                tab.cursor.x += 1;
+                            }
+                            
+                            // If not the last line, add a newline
+                            if i < clipboard_lines.len() - 1 {
+                                tab.buffer.insert_newline_at_cursor(&tab.cursor);
+                                tab.cursor.y += 1;
+                                tab.cursor.x = 0;
+                            }
+                        }
+                        
+                        // Position cursor at the start of the first pasted line
+                        tab.cursor.y = cursor_y;
+                        tab.cursor.x = 0;
+                    } else {
+                        // Paste inline before cursor
+                        // First, move cursor left (if possible)
+                        if cursor_x > 0 {
+                            tab.cursor.x -= 1;
+                        }
+                        
+                        // Paste the content
+                        for c in clipboard_content.chars() {
+                            tab.buffer.insert_char_at_cursor(c, &tab.cursor);
+                            tab.cursor.x += 1;
+                        }
+                        
+                        // Move cursor back to original position
+                        if cursor_x > 0 {
+                            tab.cursor.x = cursor_x;
+                        }
+                    }
+                    
+                    self.update_viewport();
+                    self.invalidate_highlight_cache();
+                }
             },
             // Beginning of line (^)
             KeyCode::Char('^') => {
