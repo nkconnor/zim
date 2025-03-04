@@ -7,7 +7,7 @@ use tui::{
     Frame,
 };
 
-use crate::editor::{Editor, Mode, HighlightedLine};
+use crate::editor::{Editor, Mode, HighlightedLine, Tab};
 use std::collections::HashMap;
 use syntect::highlighting::Style as SyntectStyle;
 
@@ -497,10 +497,485 @@ fn render_editor_area_with_diff_highlights<B: Backend>(f: &mut Frame<B>, editor:
     render_editor_area_inner(f, editor, area, true, true)
 }
 
-// Use function stub until we fix rendering issues
+/// Render editor area with highlighted selection
 fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut Editor, area: Rect) -> Option<ViewportUpdate> {
-    // For now, just use the regular editor rendering
-    render_editor_area(f, editor, area)
+    // Create a block for the editor
+    let editor_block = Block::default()
+        .title(" Zim Editor ")
+        .borders(Borders::ALL);
+    
+    // Get the inner area dimensions (accounting for borders)
+    let inner_area = editor_block.inner(area);
+    
+    // Get the current tab
+    let tab = editor.current_tab();
+    
+    // Update viewport dimensions for proper rendering
+    let mut viewport = tab.viewport.clone();
+    
+    // Reserve space for line numbers (at least 4 chars for thousands of lines)
+    let line_number_width = 5; // 4 digits + 1 space
+    let content_width = inner_area.width.saturating_sub(line_number_width);
+    
+    viewport.update_dimensions(content_width as usize, inner_area.height as usize);
+    
+    // Calculate visible range
+    let (start_line, end_line) = viewport.get_visible_range(tab.buffer.line_count());
+    
+    // We'll avoid changing left_column during rendering to prevent jiggling
+    let left_column = tab.viewport.left_column;
+    
+    // Format to get max line number width
+    let total_lines = tab.buffer.line_count();
+    let line_num_width = total_lines.to_string().len();
+    
+    // Convert only visible buffer lines to Lines for rendering with line numbers
+    let lines: Vec<Line> = tab.buffer.lines[start_line..end_line].iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let line_number = start_line + idx + 1; // 1-indexed line numbers
+            let current_line_idx = start_line + idx;
+            
+            // Style the line number
+            let number_style = Style::default().fg(Color::DarkGray);
+            let number_str = format!("{:>width$} ", line_number, width=line_num_width);
+            
+            // Create line with number followed by content
+            let mut spans = vec![
+                tui::text::Span::styled(number_str, number_style)
+            ];
+            
+            // If there are no syntax highlighting or diagnostics, and the buffer uses a selection,
+            // we need to render the line with selected portions highlighted
+            let content = if left_column < line.len() {
+                line[left_column.min(line.len())..].to_string()
+            } else {
+                "".to_string()
+            };
+            
+            // Check diagnostics first
+            let current_line = start_line + idx;
+            if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
+                if !line_diagnostics.is_empty() && !content.is_empty() {
+                    // Handle diagnostic highlighting (same as in render_editor_area_inner)
+                    let mut pos = 0;
+                    let mut content_spans = Vec::new();
+                    
+                    // Sort diagnostics by start_column
+                    let mut sorted_diags = line_diagnostics.clone();
+                    sorted_diags.sort_by_key(|d| d.span.start_column);
+                    
+                    for diag in sorted_diags {
+                        let start = diag.span.start_column.saturating_sub(left_column);
+                        let end = diag.span.end_column.saturating_sub(left_column);
+                        
+                        // Skip if the diagnostic is outside the visible range
+                        if start >= content.len() || end <= 0 {
+                            continue;
+                        }
+                        
+                        // Add text before the diagnostic, checking if it's selected
+                        if start > pos {
+                            let before_text = &content[pos..start];
+                            let mut char_pos = pos;
+                            let mut selected_spans = Vec::new();
+                            let mut current_selected = false;
+                            let mut segment_start = 0;
+                            
+                            // Check each character if it's selected
+                            for (i, _) in before_text.char_indices() {
+                                let col = left_column + char_pos + i;
+                                let is_selected = tab.buffer.is_position_selected(
+                                    current_line, 
+                                    col, 
+                                    &tab.cursor, 
+                                    tab.buffer.selection_start.is_some() && editor.mode == crate::editor::Mode::VisualLine
+                                );
+                                
+                                if is_selected != current_selected {
+                                    // Transition between selected/unselected
+                                    if segment_start < i {
+                                        let segment = &before_text[segment_start..i];
+                                        if current_selected {
+                                            selected_spans.push(tui::text::Span::styled(
+                                                segment.to_string(),
+                                                Style::default().bg(Color::Blue).fg(Color::White)
+                                            ));
+                                        } else {
+                                            selected_spans.push(tui::text::Span::raw(segment.to_string()));
+                                        }
+                                    }
+                                    segment_start = i;
+                                    current_selected = is_selected;
+                                }
+                            }
+                            
+                            // Add the final segment
+                            if segment_start < before_text.len() {
+                                let segment = &before_text[segment_start..];
+                                if current_selected {
+                                    selected_spans.push(tui::text::Span::styled(
+                                        segment.to_string(),
+                                        Style::default().bg(Color::Blue).fg(Color::White)
+                                    ));
+                                } else {
+                                    selected_spans.push(tui::text::Span::raw(segment.to_string()));
+                                }
+                            }
+                            
+                            content_spans.extend(selected_spans);
+                            char_pos += before_text.len();
+                        }
+                        
+                        // Add the diagnostic with styling, checking if it's selected
+                        let diagnostic_style = match diag.severity {
+                            crate::editor::DiagnosticSeverity::Error => {
+                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                            },
+                            crate::editor::DiagnosticSeverity::Warning => {
+                                Style::default().fg(Color::Yellow)
+                            },
+                            crate::editor::DiagnosticSeverity::Information => {
+                                Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC)
+                            },
+                            crate::editor::DiagnosticSeverity::Hint => {
+                                Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC)
+                            },
+                        };
+                        
+                        let end_idx = std::cmp::min(end, content.len());
+                        if start < end_idx {
+                            let diagnostic_text = &content[start..end_idx];
+                            
+                            // Check if diagnostic text is in selection
+                            let mut char_pos = start;
+                            let mut selected_spans = Vec::new();
+                            let mut current_selected = false;
+                            let mut segment_start = 0;
+                            
+                            // Check each character if it's selected
+                            for (i, _) in diagnostic_text.char_indices() {
+                                let col = left_column + char_pos + i;
+                                let is_selected = tab.buffer.is_position_selected(
+                                    current_line, 
+                                    col, 
+                                    &tab.cursor, 
+                                    tab.buffer.selection_start.is_some() && editor.mode == crate::editor::Mode::VisualLine
+                                );
+                                
+                                if is_selected != current_selected {
+                                    // Transition between selected/unselected
+                                    if segment_start < i {
+                                        let segment = &diagnostic_text[segment_start..i];
+                                        let style = if current_selected {
+                                            diagnostic_style.patch(Style::default().bg(Color::Blue))
+                                        } else {
+                                            diagnostic_style
+                                        };
+                                        selected_spans.push(tui::text::Span::styled(segment.to_string(), style));
+                                    }
+                                    segment_start = i;
+                                    current_selected = is_selected;
+                                }
+                            }
+                            
+                            // Add the final segment
+                            if segment_start < diagnostic_text.len() {
+                                let segment = &diagnostic_text[segment_start..];
+                                let style = if current_selected {
+                                    diagnostic_style.patch(Style::default().bg(Color::Blue))
+                                } else {
+                                    diagnostic_style
+                                };
+                                selected_spans.push(tui::text::Span::styled(segment.to_string(), style));
+                            }
+                            
+                            content_spans.extend(selected_spans);
+                            char_pos += diagnostic_text.len();
+                        }
+                        
+                        pos = end_idx;
+                    }
+                    
+                    // Add remaining text after the last diagnostic
+                    if pos < content.len() {
+                        let after_text = &content[pos..];
+                        
+                        // Check if remaining text is in selection
+                        let mut char_pos = pos;
+                        let mut selected_spans = Vec::new();
+                        let mut current_selected = false;
+                        let mut segment_start = 0;
+                        
+                        // Check each character if it's selected
+                        for (i, _) in after_text.char_indices() {
+                            let col = left_column + char_pos + i;
+                            let is_selected = tab.buffer.is_position_selected(
+                                current_line, 
+                                col, 
+                                &tab.cursor, 
+                                tab.buffer.selection_start.is_some() && editor.mode == crate::editor::Mode::VisualLine
+                            );
+                            
+                            if is_selected != current_selected {
+                                // Transition between selected/unselected
+                                if segment_start < i {
+                                    let segment = &after_text[segment_start..i];
+                                    if current_selected {
+                                        selected_spans.push(tui::text::Span::styled(
+                                            segment.to_string(),
+                                            Style::default().bg(Color::Blue).fg(Color::White)
+                                        ));
+                                    } else {
+                                        selected_spans.push(tui::text::Span::raw(segment.to_string()));
+                                    }
+                                }
+                                segment_start = i;
+                                current_selected = is_selected;
+                            }
+                        }
+                        
+                        // Add the final segment
+                        if segment_start < after_text.len() {
+                            let segment = &after_text[segment_start..];
+                            if current_selected {
+                                selected_spans.push(tui::text::Span::styled(
+                                    segment.to_string(),
+                                    Style::default().bg(Color::Blue).fg(Color::White)
+                                ));
+                            } else {
+                                selected_spans.push(tui::text::Span::raw(segment.to_string()));
+                            }
+                        }
+                        
+                        content_spans.extend(selected_spans);
+                    }
+                    
+                    // Add all spans to the line
+                    spans.extend(content_spans);
+                } else if !content.is_empty() {
+                    // No diagnostics but might be syntax highlighting
+                    add_syntax_or_selection_spans(&mut spans, editor, tab, current_line, &content, left_column);
+                }
+            } else if !content.is_empty() {
+                // No diagnostics but might be syntax highlighting
+                add_syntax_or_selection_spans(&mut spans, editor, tab, current_line, &content, left_column);
+            }
+            
+            Line::from(spans)
+        })
+        .collect();
+    
+    let paragraph = Paragraph::new(lines)
+        .block(editor_block)
+        .style(Style::default())
+        .wrap(Wrap { trim: false });
+    
+    f.render_widget(paragraph, area);
+    
+    // Set cursor position relative to viewport
+    let cursor_x = tab.cursor.x.saturating_sub(left_column);
+    let cursor_y = tab.cursor.y.saturating_sub(viewport.top_line);
+    
+    // Adjust cursor position for line numbers
+    let line_number_offset = line_num_width + 1; // width + space
+    
+    f.set_cursor(
+        area.x + cursor_x as u16 + line_number_offset as u16 + 1, // +1 for the border
+        area.y + cursor_y as u16 + 1, // +1 for the border
+    );
+    
+    // Return viewport dimensions for safe update
+    Some(ViewportUpdate {
+        width: viewport.width,
+        height: viewport.height,
+    })
+}
+
+/// Helper function to add either syntax highlighted spans or selection spans
+fn add_syntax_or_selection_spans(spans: &mut Vec<tui::text::Span<'static>>, 
+                              editor: &Editor, 
+                              tab: &Tab, 
+                              current_line: usize, 
+                              content: &str, 
+                              left_column: usize) {
+    // First check if we have syntax highlighting
+    if let Some(syntax_ref) = &tab.buffer.syntax {
+        // Get line for highlighting
+        let line_for_highlight = if current_line < tab.buffer.lines.len() {
+            &tab.buffer.lines[current_line]
+        } else {
+            ""
+        };
+        
+        // Use the cache to avoid recomputing syntax highlights
+        let tab_idx = editor.current_tab;
+        let cache_key = (tab_idx, current_line);
+        
+        // Get highlighted line from cache if available, or compute it
+        let highlighted = if let Some(cached) = editor.highlighted_lines_cache.get(&cache_key) {
+            cached.clone()
+        } else {
+            // Highlight the line (don't try to update cache since we have immutable reference)
+            editor.syntax_highlighter.highlight_text(
+                &format!("{}\n", line_for_highlight), 
+                syntax_ref.clone()
+            )
+        };
+        
+        if !highlighted.is_empty() {
+            // Process syntax highlighting with selection overlay
+            let mut line_spans = Vec::new();
+            
+            for (style, text) in &highlighted[0].ranges {
+                if text.is_empty() {
+                    continue;
+                }
+                
+                // Convert syntect style to tui style
+                let tui_style = convert_syntect_style(style);
+                
+                // For each syntax span, we need to check if any part is selected
+                // We can't directly calculate the offset using pointer arithmetic
+                // because the strings might be in different memory locations
+                // Instead, we'll use the start index from the syntax highlighting
+                let rel_start = if let Some(idx) = line_for_highlight.find(text) {
+                    idx
+                } else {
+                    // If we can't find the text in the line, use a safe default
+                    0
+                };
+                
+                if rel_start >= left_column {
+                    let rel_text = &text[..];
+                    let start_col = rel_start;
+                    
+                    // Check if any part of this span is selected
+                    let mut current_selected = false;
+                    let mut segment_start = 0;
+                    let mut segments = Vec::new();
+                    
+                    // Iterate through characters and check selection status
+                    for (i, _) in rel_text.char_indices() {
+                        let col = start_col + i;
+                        let is_selected = tab.buffer.is_position_selected(
+                            current_line, 
+                            col, 
+                            &tab.cursor, 
+                            tab.buffer.selection_start.is_some() && editor.mode == crate::editor::Mode::VisualLine
+                        );
+                        
+                        if is_selected != current_selected {
+                            // Transition between selected/unselected
+                            if segment_start < i {
+                                let segment = &rel_text[segment_start..i];
+                                if current_selected {
+                                    // Selected - use base style but with selection background
+                                    segments.push(tui::text::Span::styled(
+                                        segment.to_string(),
+                                        tui_style.patch(Style::default().bg(Color::Blue))
+                                    ));
+                                } else {
+                                    // Not selected - use base syntax style
+                                    segments.push(tui::text::Span::styled(
+                                        segment.to_string(),
+                                        tui_style
+                                    ));
+                                }
+                            }
+                            segment_start = i;
+                            current_selected = is_selected;
+                        }
+                    }
+                    
+                    // Add the final segment
+                    if segment_start < rel_text.len() {
+                        let segment = &rel_text[segment_start..];
+                        if current_selected {
+                            segments.push(tui::text::Span::styled(
+                                segment.to_string(),
+                                tui_style.patch(Style::default().bg(Color::Blue))
+                            ));
+                        } else {
+                            segments.push(tui::text::Span::styled(
+                                segment.to_string(),
+                                tui_style
+                            ));
+                        }
+                    }
+                    
+                    line_spans.extend(segments);
+                }
+            }
+            
+            if !line_spans.is_empty() {
+                spans.extend(line_spans);
+            } else {
+                add_selection_only_spans(spans, tab, current_line, content, left_column, editor.mode == crate::editor::Mode::VisualLine);
+            }
+        } else {
+            add_selection_only_spans(spans, tab, current_line, content, left_column, editor.mode == crate::editor::Mode::VisualLine);
+        }
+    } else {
+        // No syntax highlighting, just add selection spans
+        add_selection_only_spans(spans, tab, current_line, content, left_column, editor.mode == crate::editor::Mode::VisualLine);
+    }
+}
+
+/// Helper function to add only selection spans when no syntax highlighting is available
+fn add_selection_only_spans(spans: &mut Vec<tui::text::Span<'static>>,
+                           tab: &Tab,
+                           current_line: usize,
+                           content: &str,
+                           left_column: usize,
+                           is_visual_line_mode: bool) {
+    // Process the content character by character to handle selections
+    let mut current_selected = false;
+    let mut segment_start = 0;
+    let mut segments = Vec::new();
+    
+    // Check each character if it's selected
+    for (i, _) in content.char_indices() {
+        let col = left_column + i;
+        let is_selected = tab.buffer.is_position_selected(
+            current_line, 
+            col, 
+            &tab.cursor, 
+            tab.buffer.selection_start.is_some() && is_visual_line_mode
+        );
+        
+        if is_selected != current_selected {
+            // Transition between selected/unselected
+            if segment_start < i {
+                let segment = &content[segment_start..i];
+                if current_selected {
+                    segments.push(tui::text::Span::styled(
+                        segment.to_string(),
+                        Style::default().bg(Color::Blue).fg(Color::White)
+                    ));
+                } else {
+                    segments.push(tui::text::Span::raw(segment.to_string()));
+                }
+            }
+            segment_start = i;
+            current_selected = is_selected;
+        }
+    }
+    
+    // Add the final segment
+    if segment_start < content.len() {
+        let segment = &content[segment_start..];
+        if current_selected {
+            segments.push(tui::text::Span::styled(
+                segment.to_string(),
+                Style::default().bg(Color::Blue).fg(Color::White)
+            ));
+        } else {
+            segments.push(tui::text::Span::raw(segment.to_string()));
+        }
+    }
+    
+    spans.extend(segments);
 }
 
 fn render_filename_prompt<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {

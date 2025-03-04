@@ -39,7 +39,10 @@ impl Buffer {
     }
     
     /// Check if a position is within the current selection
-    pub fn is_position_selected(&self, line: usize, column: usize, cursor: &Cursor) -> bool {
+    /// 
+    /// For Visual mode, the selection extends from the start position to the cursor
+    /// For VisualLine mode, the selection extends to include entire lines from start to end
+    pub fn is_position_selected(&self, line: usize, column: usize, cursor: &Cursor, is_visual_line: bool) -> bool {
         if let Some(start) = self.selection_start {
             let (start_line, start_col) = start;
             let (end_line, end_col) = (cursor.y, cursor.x);
@@ -57,6 +60,12 @@ impl Buffer {
                 return false;
             }
             
+            // For VisualLine mode, select entire lines regardless of column
+            if is_visual_line {
+                return true;
+            }
+            
+            // For Visual mode, handle column ranges
             if line == first_line && line == last_line {
                 return column >= first_col && column < last_col;
             } else if line == first_line {
@@ -72,7 +81,9 @@ impl Buffer {
     }
     
     /// Get the selected text
-    pub fn get_selected_text(&self, cursor: &Cursor) -> String {
+    /// 
+    /// If is_visual_line is true, entire lines will be selected regardless of cursor column
+    pub fn get_selected_text(&self, cursor: &Cursor, is_visual_line: bool) -> String {
         if let Some(start) = self.selection_start {
             let (start_line, start_col) = start;
             let (end_line, end_col) = (cursor.y, cursor.x);
@@ -85,7 +96,22 @@ impl Buffer {
                 (end_line, end_col, start_line, start_col)
             };
             
-            // Handle selection on a single line
+            // For visual line mode, select entire lines
+            if is_visual_line {
+                let mut result = String::new();
+                
+                // Add all selected lines in their entirety
+                for line_idx in first_line..=last_line {
+                    if line_idx < self.lines.len() {
+                        result.push_str(&self.lines[line_idx]);
+                        result.push('\n');
+                    }
+                }
+                
+                return result;
+            }
+            
+            // Handle character-based selection on a single line
             if first_line == last_line {
                 if first_line < self.lines.len() {
                     let line = &self.lines[first_line];
@@ -98,7 +124,7 @@ impl Buffer {
                 return String::new();
             }
             
-            // Handle multi-line selection
+            // Handle multi-line character-based selection
             let mut result = String::new();
             
             // First line from start_col to end
@@ -135,7 +161,9 @@ impl Buffer {
     }
     
     /// Delete the selected text and return true if deletion was performed
-    pub fn delete_selection(&mut self, cursor: &mut Cursor) -> bool {
+    /// 
+    /// If is_visual_line is true, entire lines will be deleted regardless of cursor column
+    pub fn delete_selection(&mut self, cursor: &mut Cursor, is_visual_line: bool) -> bool {
         if let Some(start) = self.selection_start {
             let (start_line, start_col) = start;
             let (end_line, end_col) = (cursor.y, cursor.x);
@@ -148,8 +176,53 @@ impl Buffer {
                 (end_line, end_col, start_line, start_col)
             };
             
-            // Handle selection on a single line
-            if first_line == last_line && first_line < self.lines.len() {
+            // Handle visual line mode (delete entire lines)
+            if is_visual_line {
+                if first_line < self.lines.len() {
+                    // Delete the selected lines
+                    if first_line <= last_line && last_line < self.lines.len() {
+                        // Remove lines from first to last inclusive
+                        let lines_to_delete = last_line - first_line + 1;
+                        if lines_to_delete < self.lines.len() {
+                            // Don't remove all lines, leave at least one
+                            self.lines.drain(first_line..=last_line);
+                            
+                            // If we removed all lines, add an empty line
+                            if self.lines.is_empty() {
+                                self.lines.push(String::new());
+                            }
+                        } else {
+                            // Delete all but one line, make it empty
+                            self.lines = vec![String::new()];
+                        }
+                        
+                        // Mark as modified
+                        self.is_modified = true;
+                        
+                        // Update modified line indices
+                        let removed_line_count = last_line - first_line + 1;
+                        let mut new_modified_lines = HashSet::new();
+                        for &line_idx in &self.modified_lines {
+                            if line_idx < first_line {
+                                new_modified_lines.insert(line_idx);
+                            } else if line_idx > last_line {
+                                new_modified_lines.insert(line_idx - removed_line_count);
+                            }
+                        }
+                        self.modified_lines = new_modified_lines;
+                        
+                        // Move cursor to beginning of first line
+                        cursor.y = min(first_line, self.lines.len().saturating_sub(1));
+                        cursor.x = 0;
+                        
+                        // Clear selection
+                        self.selection_start = None;
+                        return true;
+                    }
+                }
+            }
+            // Handle character-based selection on a single line
+            else if first_line == last_line && first_line < self.lines.len() {
                 let line = &mut self.lines[first_line];
                 let end_col = min(last_col, line.len());
                 let start_col = min(first_col, line.len());

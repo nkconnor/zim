@@ -1,5 +1,11 @@
 # Zim Editor Information
 
+## ⚠️ CRITICAL WARNINGS ⚠️
+
+### !!! NEVER USE `cargo run` UNDER ANY CIRCUMSTANCES !!!
+### !!! NEVER USE `cargo run` UNDER ANY CIRCUMSTANCES !!!
+### !!! NEVER USE `cargo run` UNDER ANY CIRCUMSTANCES !!!
+
 ## Important Information
 
 - NEVER use unsafe code in this codebase
@@ -7,7 +13,6 @@
 - When making changes, use existing patterns and conventions
 - Keep the editor's functionality following vim-like keybindings
 - Ensure functionality is tested with cargo test
-- IMPORTANT: NEVER use `cargo run` directly, this can cause errors
 
 ## Common Commands
 
@@ -20,8 +25,9 @@ cargo build
 # Run tests
 cargo test
 
-# Build and run - DO NOT USE
-# cargo run
+# ⛔️⛔️⛔️ NEVER DO THIS ⛔️⛔️⛔️
+# ⛔️⛔️⛔️ NEVER USE cargo run ⛔️⛔️⛔️
+# ⛔️⛔️⛔️ THIS WILL CAUSE ERRORS ⛔️⛔️⛔️
 ```
 
 ## Code Structure

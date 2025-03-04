@@ -333,8 +333,8 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             Mode::WriteConfirm => self.handle_write_confirm_mode(key),
             Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
             Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
-            // For visual modes, just use Escape to exit for now
-            Mode::Visual | Mode::VisualLine => {
+            // Visual mode with character selection
+            Mode::Visual => {
                 use crossterm::event::KeyCode;
                 match key.code {
                     KeyCode::Esc => {
@@ -342,6 +342,20 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         self.mode = Mode::Normal;
                         Ok(true)
                     },
+                    // Add support for key handling in visual mode
+                    _ => self.handle_normal_mode(key),
+                }
+            },
+            // Visual line mode with line selection
+            Mode::VisualLine => {
+                use crossterm::event::KeyCode;
+                match key.code {
+                    KeyCode::Esc => {
+                        self.current_tab_mut().buffer.clear_selection();
+                        self.mode = Mode::Normal;
+                        Ok(true)
+                    },
+                    // Add support for key handling in visual line mode
                     _ => self.handle_normal_mode(key),
                 }
             },
