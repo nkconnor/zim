@@ -1231,3 +1231,41 @@ impl Buffer {
         Ok(diff_lines)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_delete_line_with_undo() {
+        let mut buffer = Buffer::new();
+        buffer.lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+            "Third line".to_string(),
+        ];
+        
+        let mut cursor = Cursor { x: 0, y: 0 };
+        
+        // Delete the second line
+        buffer.delete_line(1);
+        
+        // Check that the line was deleted
+        assert_eq!(buffer.lines.len(), 2);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "Third line");
+        
+        // Check if we can undo
+        assert!(buffer.history.can_undo());
+        
+        // Undo the deletion
+        let undo_successful = buffer.undo(&mut cursor);
+        assert!(undo_successful);
+        
+        // Check that the line was restored
+        assert_eq!(buffer.lines.len(), 3);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "Second line");
+        assert_eq!(buffer.lines[2], "Third line");
+    }
+}

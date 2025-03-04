@@ -1501,6 +1501,38 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         self.mode = Mode::TokenSearch;
                         self.token_search = TokenSearch::new();
                     },
+                    "delete_line" => {
+                        let cursor_y = self.current_tab().cursor.y;
+                        self.current_tab_mut().buffer.delete_line(cursor_y);
+                        
+                        // Adjust cursor if needed
+                        let tab = self.current_tab_mut();
+                        if tab.cursor.y >= tab.buffer.line_count() {
+                            tab.cursor.y = tab.buffer.line_count().saturating_sub(1);
+                        }
+                        // Reset x position
+                        let line_len = tab.buffer.line_length(tab.cursor.y);
+                        if tab.cursor.x > line_len {
+                            tab.cursor.x = line_len.saturating_sub(1).max(0);
+                        }
+                        
+                        self.update_viewport();
+                        self.invalidate_highlight_cache();
+                    },
+                    "undo" => {
+                        let tab = self.current_tab_mut();
+                        if tab.buffer.undo(&mut tab.cursor) {
+                            self.update_viewport();
+                            self.invalidate_highlight_cache();
+                        }
+                    },
+                    "redo" => {
+                        let tab = self.current_tab_mut();
+                        if tab.buffer.redo(&mut tab.cursor) {
+                            self.update_viewport();
+                            self.invalidate_highlight_cache();
+                        }
+                    },
                     _ => {}
                 }
                 return Ok(true);
@@ -2565,5 +2597,59 @@ mod tests {
         // Check that we're back in normal mode with no selection
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.current_tab().buffer.selection_start, None);
+    }
+    
+    #[test]
+    fn test_delete_line_with_undo_redo() {
+        // Create editor with test content
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Set to Normal mode (editor starts in FileFinder mode by default)
+        editor.mode = Mode::Normal;
+        
+        // Setup buffer with 3 lines
+        editor.current_tab_mut().buffer.lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+            "Third line".to_string(),
+        ];
+        
+        // Move cursor to second line
+        editor.current_tab_mut().cursor.y = 1;
+        editor.current_tab_mut().cursor.x = 0;
+        
+        // Delete the line directly (instead of simulating key press)
+        editor.current_tab_mut().buffer.delete_line(1);
+        
+        // Verify line was deleted
+        assert_eq!(editor.current_tab().buffer.lines.len(), 2);
+        assert_eq!(editor.current_tab().buffer.lines[0], "First line");
+        assert_eq!(editor.current_tab().buffer.lines[1], "Third line");
+        
+        // Call undo on buffer
+        {
+            let tab = editor.current_tab_mut();
+            let undo_successful = tab.buffer.undo(&mut tab.cursor);
+            assert!(undo_successful);
+        }
+        
+        // Verify the line was restored
+        assert_eq!(editor.current_tab().buffer.lines.len(), 3);
+        assert_eq!(editor.current_tab().buffer.lines[0], "First line");
+        assert_eq!(editor.current_tab().buffer.lines[1], "Second line");
+        assert_eq!(editor.current_tab().buffer.lines[2], "Third line");
+        
+        // Call redo on buffer
+        {
+            let tab = editor.current_tab_mut();
+            let redo_successful = tab.buffer.redo(&mut tab.cursor);
+            assert!(redo_successful);
+        }
+        
+        // Verify the line was deleted again
+        assert_eq!(editor.current_tab().buffer.lines.len(), 2);
+        assert_eq!(editor.current_tab().buffer.lines[0], "First line");
+        assert_eq!(editor.current_tab().buffer.lines[1], "Third line");
     }
 }
