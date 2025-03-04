@@ -90,7 +90,7 @@ impl Snake {
             score: 0,
             max_score: (width * height) / 4, // Win when snake fills 1/4 of the board
             last_update: Instant::now(),
-            speed: Duration::from_millis(200), // Initial speed
+            speed: Duration::from_millis(100), // Initial speed (faster)
         }
     }
     
@@ -162,8 +162,8 @@ impl Snake {
                 return true;
             }
             
-            // Increase speed slightly
-            self.speed = Duration::from_millis((self.speed.as_millis() as f64 * 0.95) as u64);
+            // Increase speed more aggressively
+            self.speed = Duration::from_millis((self.speed.as_millis() as f64 * 0.90) as u64);
             
             // Generate new food position
             let mut rng = rand::thread_rng();

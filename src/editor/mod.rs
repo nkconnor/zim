@@ -794,8 +794,10 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
     pub fn start_snake_game(&mut self) {
         // Get viewport dimensions for game area
         let tab = self.current_tab();
-        let width = tab.viewport.width;
-        let height = tab.viewport.height;
+        // Use an even smaller play area (since we're using double-width characters)
+        // this creates a better game experience
+        let width = tab.viewport.width / 3;
+        let height = tab.viewport.height / 2;
         
         // Create a new snake game
         self.snake_game = Some(Snake::new(width, height));

@@ -111,11 +111,11 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
     /// Render the snake game
     fn render_snake_game<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
         if let Some(snake) = &editor.snake_game {
-            // Create a block for the snake game
+            // Create a block for the snake game with a more attractive border
             let game_block = Block::default()
-                .title(" Snake Game ")
+                .title(" 🐍 SNAKE GAME 🐍 ")
                 .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-                .borders(Borders::ALL)
+                .borders(Borders::ALL)  // Standard border
                 .border_style(Style::default().fg(Color::Green));
             
             let inner_area = game_block.inner(area);
@@ -137,19 +137,19 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
                 cells[food.y][food.x] = '●';
             }
             
-            // Create lines from cells
+            // Create lines from cells, using double-width characters for better visibility
             let lines: Vec<Line> = cells.iter().map(|row| {
                 let spans: Vec<Span> = row.iter().map(|&cell| {
                     match cell {
                         '█' => Span::styled(
-                            cell.to_string(),
+                            "██", // Double width character for snake
                             Style::default().fg(Color::Green),
                         ),
                         '●' => Span::styled(
-                            cell.to_string(),
+                            "●●", // Double width character for food
                             Style::default().fg(Color::Red),
                         ),
-                        _ => Span::raw(cell.to_string()),
+                        _ => Span::raw("  "), // Double width for empty space
                     }
                 }).collect();
                 Line::from(spans)
