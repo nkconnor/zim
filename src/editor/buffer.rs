@@ -4,12 +4,14 @@ use super::cursor::Cursor;
 
 pub struct Buffer {
     pub lines: Vec<String>,
+    pub file_path: Option<String>,
 }
 
 impl Buffer {
     pub fn new() -> Self {
         Self {
             lines: vec![String::new()],
+            file_path: None,
         }
     }
 
@@ -23,6 +25,9 @@ impl Buffer {
         if self.lines.is_empty() {
             self.lines.push(String::new());
         }
+        
+        // Store the file path
+        self.file_path = Some(path.to_string());
         
         Ok(())
     }

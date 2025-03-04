@@ -9,4 +9,6 @@ pub enum Mode {
     Command,
     /// File finder mode (for finding and opening files)
     FileFinder,
+    /// Help mode (displays keyboard shortcuts and help information)
+    Help,
 }

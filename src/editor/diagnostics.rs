@@ -94,43 +94,111 @@ impl DiagnosticCollection {
             .collect()
     }
     
-    /// Parse diagnostics from cargo output
-    pub fn parse_cargo_output(&mut self, output: &str, file_path: &str) {
+    /// Parse diagnostics from cargo output, filtering to only include the current file
+    pub fn parse_cargo_output(&mut self, output: &str, current_file_path: &str) {
         self.clear();
         
-        // Simple parser for common cargo diagnostic format
-        for line in output.lines() {
-            // Example: warning: unused import: `sql::Pool`
-            //   --> crates/admin/src/debug.rs:16:5
-            if line.trim().is_empty() {
+        // Extract the filename without the path for easier matching
+        let current_filename = if let Some(filename) = std::path::Path::new(current_file_path).file_name() {
+            filename.to_string_lossy().to_string()
+        } else {
+            // If we can't extract the filename, use the full path
+            current_file_path.to_string()
+        };
+        
+        // We need to handle multi-line cargo output
+        let lines: Vec<&str> = output.lines().collect();
+        let mut i = 0;
+        
+        while i < lines.len() {
+            let line = lines[i].trim();
+            
+            // Skip empty lines
+            if line.is_empty() {
+                i += 1;
                 continue;
             }
             
-            // Check if the line contains a diagnostic
-            if let Some(error_idx) = line.find("error:") {
-                self.parse_diagnostic(line, error_idx, DiagnosticSeverity::Error, file_path);
+            // Look for diagnostic pattern
+            let (severity, message) = if let Some(error_idx) = line.find("error:") {
+                let message_start = error_idx + "error:".len();
+                (DiagnosticSeverity::Error, line[message_start..].trim().to_string())
             } else if let Some(warning_idx) = line.find("warning:") {
-                self.parse_diagnostic(line, warning_idx, DiagnosticSeverity::Warning, file_path);
+                let message_start = warning_idx + "warning:".len();
+                (DiagnosticSeverity::Warning, line[message_start..].trim().to_string())
+            } else {
+                // Not a diagnostic line
+                i += 1;
+                continue;
+            };
+            
+            // Try to find the location information in the next line
+            let mut line_num = 0;
+            let mut col_start = 0;
+            let mut col_end = 10; // Default span width
+            let mut is_current_file = false;
+            
+            // Look ahead for location line
+            if i + 1 < lines.len() {
+                let location_line = lines[i + 1].trim();
+                // Format is typically: --> file:line:column
+                if location_line.contains("-->") {
+                    // Extract the file path
+                    let parts: Vec<&str> = location_line.split("-->").collect();
+                    if parts.len() > 1 {
+                        let file_info = parts[1].trim();
+                        
+                        // Check if this is for the current file
+                        is_current_file = file_info.contains(&current_filename);
+                        
+                        // Parse line and column if it's for the current file
+                        if is_current_file {
+                            let file_parts: Vec<&str> = file_info.split(":").collect();
+                            if file_parts.len() > 1 {
+                                // Parse line number
+                                if let Ok(parsed_line) = file_parts[1].trim().parse::<usize>() {
+                                    line_num = parsed_line.saturating_sub(1); // 0-indexed in our editor
+                                }
+                                
+                                // Parse column
+                                if file_parts.len() > 2 {
+                                    if let Ok(parsed_col) = file_parts[2].trim().parse::<usize>() {
+                                        col_start = parsed_col.saturating_sub(1); // 0-indexed
+                                        
+                                        // Try to determine the span width from the code
+                                        if i + 3 < lines.len() && lines[i + 3].contains("^") {
+                                            let span_line = lines[i + 3].trim_start();
+                                            let span_width = span_line.chars().take_while(|&c| c == '^').count();
+                                            if span_width > 0 {
+                                                col_end = col_start + span_width;
+                                            } else {
+                                                col_end = col_start + 10; // Default
+                                            }
+                                        } else {
+                                            col_end = col_start + 10; // Default
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            
+            // Only add diagnostics for the current file
+            if is_current_file {
+                // Create the diagnostic
+                let diagnostic = Diagnostic::new(
+                    &message,
+                    severity,
+                    TextSpan::new(line_num, col_start, col_end),
+                );
+                
+                self.add_diagnostic(diagnostic);
+            }
+            
+            i += 1;
         }
-    }
-    
-    fn parse_diagnostic(&mut self, line: &str, idx: usize, severity: DiagnosticSeverity, file_path: &str) {
-        // Extract message
-        let message_start = idx + "error:".len();
-        let message = line[message_start..].trim().to_string();
-        
-        // Look for the next line with file location
-        // TODO: Implement proper parsing of the location from next lines
-        // For now, we'll just add a generic diagnostic at the start of the file
-        
-        let diagnostic = Diagnostic::new(
-            &message,
-            severity,
-            TextSpan::new(0, 0, 10), // Default span at start of file
-        );
-        
-        self.add_diagnostic(diagnostic);
     }
 }
 

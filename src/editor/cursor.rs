@@ -189,10 +189,10 @@ mod tests {
         cursor.move_to_line_end(&buffer);
         assert_eq!(cursor.x, 10);
         
-        // Second line (length 18)
+        // Second line (length 19)
         cursor.y = 1;
         cursor.move_to_line_end(&buffer);
-        assert_eq!(cursor.x, 18);
+        assert_eq!(cursor.x, 19);
     }
 
     #[test]

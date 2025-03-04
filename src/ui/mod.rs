@@ -12,26 +12,104 @@ use crate::editor::{Editor, Mode};
 pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
     let size = f.size();
 
-    // Create the layout
+    // Create the layout with tab bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
+        .constraints([
+            Constraint::Length(2), // Tab bar
+            Constraint::Min(1),    // Editor area
+            Constraint::Length(1)  // Status line
+        ].as_ref())
         .split(size);
 
+    // Render the tab bar
+    render_tab_bar(f, editor, chunks[0]);
+    
+    // Render main content
     match editor.mode {
         Mode::FileFinder => {
-            render_file_finder(f, editor, chunks[0]);
+            render_file_finder(f, editor, chunks[1]);
+        },
+        Mode::Help => {
+            render_help_page(f, editor, chunks[1]);
         },
         _ => {
-            render_editor_area(f, editor, chunks[0]);
+            render_editor_area(f, editor, chunks[1]);
         }
     }
     
-    render_status_line(f, editor, chunks[1]);
+    // Render status line
+    render_status_line(f, editor, chunks[2]);
+}
+
+/// Render the tab bar
+fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    let tab_bar_block = Block::default()
+        .title(" Tabs ")
+        .borders(Borders::ALL);
+    
+    let inner_area = tab_bar_block.inner(area);
+    f.render_widget(tab_bar_block, area);
+    
+    // Create tab items
+    let mut tab_spans = Vec::new();
+    
+    for (idx, tab) in editor.tabs.iter().enumerate() {
+        // Get filename for tab or show untitled
+        let filename = match &tab.buffer.file_path {
+            Some(path) => {
+                if let Some(filename) = std::path::Path::new(path).file_name() {
+                    filename.to_string_lossy().to_string()
+                } else {
+                    "untitled".to_string()
+                }
+            },
+            None => "untitled".to_string(),
+        };
+        
+        // Style for current tab vs other tabs
+        let style = if idx == editor.current_tab {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        
+        // Add tab item
+        tab_spans.push(tui::text::Span::styled(
+            format!(" {} ", filename),
+            style,
+        ));
+        
+        // Add separator
+        tab_spans.push(tui::text::Span::raw(" | "));
+    }
+    
+    // Remove last separator if any tabs
+    if !tab_spans.is_empty() {
+        tab_spans.pop();
+    }
+    
+    // Add tab controls hint
+    tab_spans.push(tui::text::Span::styled(
+        " (Ctrl+t: New, Ctrl+w: Close, Tab: Next) ",
+        Style::default().fg(Color::DarkGray),
+    ));
+    
+    // Create tab line
+    let tabs_line = Line::from(tab_spans);
+    
+    // Render tabs
+    let tabs_paragraph = Paragraph::new(vec![tabs_line])
+        .alignment(tui::layout::Alignment::Left);
+    
+    f.render_widget(tabs_paragraph, inner_area);
 }
 
 fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Get the current tab
+    let tab = editor.current_tab();
+    
     let editor_block = Block::default()
         .title(" Zim Editor ")
         .borders(Borders::ALL);
@@ -41,7 +119,7 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     
     // Update only the viewport dimensions in the editor (not top_line/left_column)
     // This allows for proper scrolling calculations while avoiding jiggling
-    let mut viewport = editor.viewport.clone();
+    let mut viewport = tab.viewport.clone();
     
     // Reserve space for line numbers (at least 4 chars for thousands of lines)
     let line_number_width = 5; // 4 digits + 1 space
@@ -51,22 +129,24 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     
     // Sync dimensions with editor's viewport, but not the scroll position
     if let Some(editor_mut) = unsafe { (editor as *const Editor as *mut Editor).as_mut() } {
-        editor_mut.viewport.width = viewport.width;
-        editor_mut.viewport.height = viewport.height;
+        if let Some(tab_mut) = editor_mut.tabs.get_mut(editor_mut.current_tab) {
+            tab_mut.viewport.width = viewport.width;
+            tab_mut.viewport.height = viewport.height;
+        }
     }
     
     // Calculate visible range
-    let (start_line, end_line) = viewport.get_visible_range(editor.buffer.line_count());
+    let (start_line, end_line) = viewport.get_visible_range(tab.buffer.line_count());
     
     // We'll avoid changing left_column during rendering to prevent jiggling
-    let left_column = editor.viewport.left_column;
+    let left_column = tab.viewport.left_column;
     
     // Format to get max line number width
-    let total_lines = editor.buffer.line_count();
+    let total_lines = tab.buffer.line_count();
     let line_num_width = total_lines.to_string().len();
     
     // Convert only visible buffer lines to Lines for rendering with line numbers
-    let lines: Vec<Line> = editor.buffer.lines[start_line..end_line].iter()
+    let lines: Vec<Line> = tab.buffer.lines[start_line..end_line].iter()
         .enumerate()
         .map(|(idx, line)| {
             let line_number = start_line + idx + 1; // 1-indexed line numbers
@@ -89,10 +169,9 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             
             // Check if there are diagnostics for this line
             let current_line = start_line + idx;
-            if let Some(line_diagnostics) = editor.diagnostics.get_diagnostics_for_line(current_line) {
+            if let Some(line_diagnostics) = tab.diagnostics.get_diagnostics_for_line(current_line) {
                 // If there are diagnostics, create styled spans based on the diagnostics
                 if !line_diagnostics.is_empty() && !content.is_empty() {
-                    let mut remaining = content.clone();
                     let mut pos = 0;
                     let mut content_spans = Vec::new();
                     
@@ -172,8 +251,8 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
 
     // Set cursor position relative to viewport
     // Use the same left_column we used for rendering to ensure consistency
-    let cursor_x = editor.cursor.x.saturating_sub(left_column);
-    let cursor_y = editor.cursor.y.saturating_sub(viewport.top_line);
+    let cursor_x = tab.cursor.x.saturating_sub(left_column);
+    let cursor_y = tab.cursor.y.saturating_sub(viewport.top_line);
     
     // Adjust cursor position for line numbers
     // Add the number width to the cursor x position
@@ -249,31 +328,158 @@ fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     );
 }
 
+fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) {
+    let help_block = Block::default()
+        .title(" Help - Press ESC to exit ")
+        .borders(Borders::ALL);
+    
+    let inner_area = help_block.inner(area);
+    f.render_widget(help_block, area);
+    
+    // Create sections of help content
+    let mut text = Vec::new();
+    
+    // Title section
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "ZIM EDITOR KEYBOARD SHORTCUTS",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(""));
+    
+    // Normal Mode section
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "NORMAL MODE",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(""));
+    
+    // Basic navigation
+    text.push(Line::from(vec![
+        tui::text::Span::styled("Basic Navigation:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("h, j, k, l - Move left, down, up, right"));
+    text.push(Line::from("^ - Move to start of line"));
+    text.push(Line::from("$ - Move to end of line"));
+    text.push(Line::from("g - Move to top of file"));
+    text.push(Line::from("G - Move to bottom of file"));
+    text.push(Line::from("Ctrl+b - Page up"));
+    text.push(Line::from("Ctrl+f - Page down"));
+    text.push(Line::from(""));
+    
+    // Modes
+    text.push(Line::from(vec![
+        tui::text::Span::styled("Mode Switching:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("i - Enter Insert mode"));
+    text.push(Line::from(": - Enter Command mode"));
+    text.push(Line::from("ESC - Return to Normal mode (from any mode)"));
+    text.push(Line::from(""));
+    
+    // Tabs
+    text.push(Line::from(vec![
+        tui::text::Span::styled("Tab Management:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+t - New tab"));
+    text.push(Line::from("Ctrl+w - Close tab"));
+    text.push(Line::from("Tab - Next tab"));
+    text.push(Line::from("Shift+Tab - Previous tab"));
+    text.push(Line::from(""));
+    
+    // File operations
+    text.push(Line::from(vec![
+        tui::text::Span::styled("File Operations:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+p - Find file"));
+    text.push(Line::from("q - Quit (in normal mode)"));
+    text.push(Line::from(""));
+    
+    // Cargo integration
+    text.push(Line::from(vec![
+        tui::text::Span::styled("Cargo Integration:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+d - Run cargo check"));
+    text.push(Line::from("Ctrl+y - Run cargo clippy"));
+    text.push(Line::from(""));
+    
+    // Help
+    text.push(Line::from(vec![
+        tui::text::Span::styled("Help:", Style::default().add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+h - Show this help page"));
+    text.push(Line::from("ESC or q - Exit help and return to normal mode"));
+    
+    // Render the help text
+    let help_text = Paragraph::new(text)
+        .alignment(tui::layout::Alignment::Left)
+        .scroll((0, 0));
+    
+    f.render_widget(help_text, inner_area);
+}
+
 fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     let mode_text = match editor.mode {
         Mode::Normal => "NORMAL",
         Mode::Insert => "INSERT",
         Mode::Command => "COMMAND",
         Mode::FileFinder => "FILE FINDER",
+        Mode::Help => "HELP",
     };
     
     let status = match editor.mode {
         Mode::FileFinder => format!("{} | Press Enter to select, Esc to cancel", mode_text),
         _ => {
-            let total_lines = editor.buffer.line_count();
-            let viewport = &editor.viewport;
+            // Get current tab info
+            let tab = editor.current_tab();
+            let total_lines = tab.buffer.line_count();
+            let viewport = &tab.viewport;
             let top_percent = if total_lines > 0 {
                 (viewport.top_line * 100) / total_lines
             } else {
                 0
             };
             
-            format!("{} | Ln: {}/{} ({}%), Col: {}", 
-                mode_text, 
-                editor.cursor.y + 1, 
+            // Get filename if available
+            let file_info = match &tab.buffer.file_path {
+                Some(path) => {
+                    if let Some(filename) = std::path::Path::new(path).file_name() {
+                        filename.to_string_lossy().to_string()
+                    } else {
+                        "untitled".to_string()
+                    }
+                },
+                None => "untitled".to_string(),
+            };
+            
+            // Get diagnostic count for the current file
+            let error_count = tab.diagnostics.get_all_diagnostics().iter()
+                .filter(|d| d.severity == crate::editor::DiagnosticSeverity::Error)
+                .count();
+            
+            let warning_count = tab.diagnostics.get_all_diagnostics().iter()
+                .filter(|d| d.severity == crate::editor::DiagnosticSeverity::Warning)
+                .count();
+            
+            // Create diagnostic indicators
+            let diagnostic_info = if error_count > 0 || warning_count > 0 {
+                format!(" | ❌ {} ⚠️ {}", error_count, warning_count)
+            } else {
+                "".to_string()
+            };
+            
+            format!("{} | {} | Tab {}/{} | Ln: {}/{} ({}%), Col: {}{}", 
+                mode_text,
+                file_info, 
+                editor.current_tab + 1,
+                editor.tabs.len(),
+                tab.cursor.y + 1, 
                 total_lines,
                 top_percent,
-                editor.cursor.x + 1
+                tab.cursor.x + 1,
+                diagnostic_info
             )
         },
     };

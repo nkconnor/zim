@@ -68,10 +68,16 @@ impl KeyBinding {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeyBindings {
     // Maps from command name to key binding
+    #[serde(default)]
     pub normal_mode: HashMap<String, KeyBinding>,
+    #[serde(default)]
     pub insert_mode: HashMap<String, KeyBinding>,
+    #[serde(default)]
     pub command_mode: HashMap<String, KeyBinding>,
+    #[serde(default)]
     pub file_finder_mode: HashMap<String, KeyBinding>,
+    #[serde(default)]
+    pub help_mode: HashMap<String, KeyBinding>,
 }
 
 impl Default for KeyBindings {
@@ -99,14 +105,26 @@ impl Default for KeyBindings {
         normal_mode.insert("page_down".to_string(), KeyBinding::new("f").with_modifier("ctrl"));
         
         // Diagnostics
-        normal_mode.insert("run_cargo_check".to_string(), KeyBinding::new("c").with_modifier("ctrl"));
-        normal_mode.insert("run_cargo_clippy".to_string(), KeyBinding::new("l").with_modifier("ctrl"));
+        normal_mode.insert("run_cargo_check".to_string(), KeyBinding::new("d").with_modifier("ctrl"));
+        normal_mode.insert("run_cargo_clippy".to_string(), KeyBinding::new("y").with_modifier("ctrl"));
+        
+        // Tab management
+        normal_mode.insert("new_tab".to_string(), KeyBinding::new("t").with_modifier("ctrl"));
+        normal_mode.insert("close_tab".to_string(), KeyBinding::new("w").with_modifier("ctrl"));
+        normal_mode.insert("next_tab".to_string(), KeyBinding::new("tab"));
+        normal_mode.insert("prev_tab".to_string(), KeyBinding::new("tab").with_modifier("shift"));
+        
+        // Help
+        normal_mode.insert("show_help".to_string(), KeyBinding::new("h").with_modifier("ctrl"));
         
         let mut insert_mode = HashMap::new();
         insert_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
 
         let mut command_mode = HashMap::new();
         command_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
+        
+        let mut help_mode = HashMap::new();
+        help_mode.insert("normal_mode".to_string(), KeyBinding::new("esc"));
 
         let mut file_finder_mode = HashMap::new();
         file_finder_mode.insert("cancel".to_string(), KeyBinding::new("esc"));
@@ -119,6 +137,7 @@ impl Default for KeyBindings {
             insert_mode,
             command_mode,
             file_finder_mode,
+            help_mode,
         }
     }
 }
