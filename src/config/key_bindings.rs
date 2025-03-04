@@ -77,6 +77,8 @@ pub struct KeyBindings {
     #[serde(default)]
     pub file_finder_mode: HashMap<String, KeyBinding>,
     #[serde(default)]
+    pub token_search_mode: HashMap<String, KeyBinding>,
+    #[serde(default)]
     pub help_mode: HashMap<String, KeyBinding>,
 }
 
@@ -98,6 +100,11 @@ impl Default for KeyBindings {
         normal_mode.insert(
             "find_file".to_string(),
             KeyBinding::new("o").with_modifier("ctrl"),
+        );
+        // Token search mode
+        normal_mode.insert(
+            "token_search".to_string(),
+            KeyBinding::new("t").with_modifier("ctrl"),
         );
 
         // Line navigation
@@ -182,11 +189,18 @@ impl Default for KeyBindings {
         file_finder_mode.insert("next".to_string(), KeyBinding::new("down"));
         file_finder_mode.insert("previous".to_string(), KeyBinding::new("up"));
 
+        let mut token_search_mode = HashMap::new();
+        token_search_mode.insert("cancel".to_string(), KeyBinding::new("esc"));
+        token_search_mode.insert("select".to_string(), KeyBinding::new("enter"));
+        token_search_mode.insert("next".to_string(), KeyBinding::new("down"));
+        token_search_mode.insert("previous".to_string(), KeyBinding::new("up"));
+
         Self {
             normal_mode,
             insert_mode,
             command_mode,
             file_finder_mode,
+            token_search_mode,
             help_mode,
         }
     }

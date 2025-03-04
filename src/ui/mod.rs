@@ -40,6 +40,9 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
         Mode::FileFinder => {
             render_file_finder(f, editor, chunks[1]);
         },
+        Mode::TokenSearch => {
+            render_token_search(f, editor, chunks[1]);
+        },
         Mode::Help => {
             render_help_page(f, editor, chunks[1]);
         },
@@ -1130,6 +1133,144 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+/// Render the token search interface
+fn render_token_search<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+    // Create a block for the token search
+    let token_search_block = Block::default()
+        .title(" Token Search ")
+        .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner_area = token_search_block.inner(area);
+    f.render_widget(token_search_block, area);
+
+    // Create layout for search query and results
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Search query
+            Constraint::Min(1),    // Search results
+        ].as_ref())
+        .split(inner_area);
+
+    // Render search query
+    let search_block = Block::default()
+        .title(" Search Query ")
+        .title_style(Style::default().fg(Color::LightBlue))
+        .borders(Borders::ALL);
+    
+    let search_text = Paragraph::new(editor.token_search.query.clone())
+        .block(search_block)
+        .style(Style::default());
+    
+    f.render_widget(search_text, main_layout[0]);
+
+    // Render search results
+    let results_block = Block::default()
+        .title(format!(" Results ({}) ", editor.token_search.results.len()))
+        .title_style(Style::default().fg(Color::Green))
+        .borders(Borders::ALL);
+
+    let results_area = results_block.inner(main_layout[1]);
+    f.render_widget(results_block, main_layout[1]);
+
+    let results = &editor.token_search.results;
+    let selected_index = editor.token_search.selected_index;
+    
+    if results.is_empty() {
+        // Show a message when there are no results
+        let help_text = if editor.token_search.query.is_empty() {
+            "Type to search for tokens in your code"
+        } else if editor.token_search.query.len() < 3 {
+            "Enter at least 3 characters to search"
+        } else {
+            "No matching results found"
+        };
+        
+        let help_paragraph = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::Gray))
+            .alignment(tui::layout::Alignment::Center);
+        
+        f.render_widget(help_paragraph, results_area);
+    } else {
+        // Create list items from search results
+        let items: Vec<ListItem> = results
+            .iter()
+            .enumerate()
+            .map(|(i, result)| {
+                // Format the line content to show the match with context
+                let line_content = &result.line_content;
+                
+                // Get path components for better display
+                let path_parts: Vec<&str> = result.file_path.split('/').collect();
+                let file_display = if path_parts.len() > 1 {
+                    format!("{}/{}", path_parts[path_parts.len()-2], path_parts[path_parts.len()-1])
+                } else {
+                    result.file_path.clone()
+                };
+                
+                // Format the display
+                let display_text = format!(
+                    "{}: {} | {}", 
+                    file_display,
+                    result.line_number + 1,  // 1-based line number for display
+                    line_content
+                );
+                
+                let style = if i == selected_index {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                
+                // Highlight the matched text within the line
+                let col = result.column;
+                let matched_text = &result.matched_text;
+                
+                // Split into three parts: before match, match, after match
+                let before_match = if col > 0 { &line_content[..col] } else { "" };
+                let after_match = if col + matched_text.len() < line_content.len() {
+                    &line_content[col + matched_text.len()..]
+                } else {
+                    ""
+                };
+                
+                // Create spans with the matched part highlighted
+                let content = Line::from(vec![
+                    Span::styled(
+                        format!("{}: {} | ", file_display, result.line_number + 1),
+                        Style::default().fg(Color::Blue)
+                    ),
+                    Span::raw(before_match),
+                    Span::styled(
+                        matched_text, 
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    ),
+                    Span::raw(after_match),
+                ]);
+                
+                if i == selected_index {
+                    ListItem::new(content).style(Style::default().bg(Color::DarkGray))
+                } else {
+                    ListItem::new(content)
+                }
+            })
+            .collect();
+        
+        let results_list = List::new(items)
+            .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        
+        f.render_widget(results_list, results_area);
+    }
+
+    // Set cursor at the end of the search query
+    f.set_cursor(
+        main_layout[0].x + editor.token_search.query.len() as u16 + 1,
+        main_layout[0].y + 1,
+    );
+}
+
 fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create a block for the file finder with a nicer title
     let file_finder_block = Block::default()
@@ -1258,7 +1399,7 @@ fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     );
 }
 
-fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) {
+fn render_help_page<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     let help_block = Block::default()
         .title(" Help - Press ESC to exit ")
         .borders(Borders::ALL);
@@ -1412,9 +1553,10 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     
     // Help
     text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Help:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Help and Search:", Style::default().add_modifier(Modifier::BOLD))
     ]));
     text.push(Line::from("Ctrl+h - Show this help page"));
+    text.push(Line::from("Ctrl+t - Search for code tokens across files"));
     text.push(Line::from("ESC or q - Exit help and return to normal mode"));
     
     // Render the help text
@@ -1449,6 +1591,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
             format!(":{}", editor.command_text)
         },
         Mode::FileFinder => "FILE FINDER".to_string(),
+        Mode::TokenSearch => format!("TOKEN SEARCH: {}", editor.token_search.query),
         Mode::Help => "HELP".to_string(),
         Mode::WriteConfirm => "WRITE? (y/n/q)".to_string(),
         Mode::ReloadConfirm => "RELOAD? (y/n)".to_string(),
@@ -1459,6 +1602,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     
     let status = match editor.mode {
         Mode::FileFinder => format!("{} | Press Enter to select, Esc to cancel", mode_text),
+        Mode::TokenSearch => format!("{} | Press Enter to go to selection, Esc to cancel", mode_text),
         Mode::FilenamePrompt => format!("{} | Press Enter to save, Esc to cancel", mode_text),
         Mode::WriteConfirm => {
             // Get current file info for write confirmation

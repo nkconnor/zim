@@ -18,6 +18,11 @@ walkdir = "2.3"
 fuzzy-matcher = "0.3"
 similar = "2.4"
 syntect = "5.1"
+grep = "0.3.2"
+grep-regex = "0.1.13"
+grep-searcher = "0.1.14"
+ignore = "0.4"
+regex = "1.11.1"
 
 [dev-dependencies]
 tempfile = "3.8"

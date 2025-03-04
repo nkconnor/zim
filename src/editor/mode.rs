@@ -9,6 +9,8 @@ pub enum Mode {
     Command,
     /// File finder mode (for finding and opening files)
     FileFinder,
+    /// Token search mode (for finding and navigating to code tokens)
+    TokenSearch,
     /// Help mode (displays keyboard shortcuts and help information)
     Help,
     /// Write confirmation mode (for confirming file write)

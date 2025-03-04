@@ -37,6 +37,7 @@ pub enum EditorCommand {
     EnterInsertMode,
     EnterCommandMode,
     EnterFileFinder,
+    EnterTokenSearch,
     ShowHelp,
     
     // Navigation
@@ -100,6 +101,7 @@ pub struct Editor {
     pub current_tab: usize,
     pub mode: Mode,
     pub file_finder: FileFinder,
+    pub token_search: TokenSearch,
     pub config: Config,
     pub save_and_quit: bool,
     pub command_text: String,
@@ -110,6 +112,176 @@ pub struct Editor {
     pub highlighted_lines_cache: HashMap<(usize, usize), Vec<HighlightedLine>>,
     /// Clipboard for storing yanked/copied text
     pub clipboard: String,
+}
+
+use grep::matcher::Matcher;
+use grep_regex::RegexMatcher;
+use grep_searcher::Searcher;
+use grep_searcher::sinks::UTF8;
+use ignore::Walk;
+use anyhow::Context;
+use regex;
+
+/// Structure for token search functionality
+pub struct TokenSearch {
+    pub query: String,
+    pub results: Vec<TokenSearchResult>,
+    pub selected_index: usize,
+}
+
+/// Represents a token search result
+#[derive(Clone)]
+pub struct TokenSearchResult {
+    pub file_path: String,
+    pub line_number: usize,
+    pub column: usize,
+    pub line_content: String,
+    pub matched_text: String,
+}
+
+impl TokenSearch {
+    pub fn new() -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            selected_index: 0,
+        }
+    }
+    
+    /// Add a character to the search query
+    pub fn add_char(&mut self, c: char) {
+        self.query.push(c);
+    }
+    
+    /// Remove the last character from the search query
+    pub fn remove_char(&mut self) {
+        self.query.pop();
+    }
+    
+    /// Move to the next search result
+    pub fn next(&mut self) {
+        if !self.results.is_empty() {
+            self.selected_index = (self.selected_index + 1) % self.results.len();
+        }
+    }
+    
+    /// Move to the previous search result
+    pub fn previous(&mut self) {
+        if !self.results.is_empty() {
+            self.selected_index = if self.selected_index == 0 {
+                self.results.len() - 1
+            } else {
+                self.selected_index - 1
+            };
+        }
+    }
+    
+    /// Get the currently selected result
+    pub fn get_selected(&self) -> Option<&TokenSearchResult> {
+        self.results.get(self.selected_index)
+    }
+    
+    /// Get a clone of the currently selected result
+    pub fn get_selected_cloned(&self) -> Option<TokenSearchResult> {
+        self.results.get(self.selected_index).cloned()
+    }
+    
+    /// Perform a search for the current query across all project files using ripgrep
+    pub fn search(&mut self) -> Result<()> {
+        self.results.clear();
+        self.selected_index = 0;
+        
+        // If query is empty, return early
+        if self.query.is_empty() {
+            return Ok(());
+        }
+        
+        // Get current directory
+        let current_dir = std::env::current_dir()
+            .context("Failed to get current directory")?;
+        
+        // Use ignore crate to respect .gitignore files and other common ignore patterns
+        let mut results = Vec::new();
+        
+        // Create a matcher with case-insensitive search
+        // Escape the query to treat it as a literal string for fuzzy matches
+        let regex_query = regex::escape(&self.query);
+        
+        // Make the regex case-insensitive by prefixing with (?i)
+        let case_insensitive_query = format!("(?i){}", regex_query);
+        
+        let matcher = match RegexMatcher::new(&case_insensitive_query) {
+            Ok(m) => m,
+            Err(e) => {
+                // Return a user-friendly error if the regex is invalid
+                return Err(anyhow::anyhow!("Invalid search pattern: {}", e));
+            }
+        };
+        
+        // Create a searcher
+        let mut searcher = Searcher::new();
+        
+        // Configure the searcher for multi-line results
+        searcher.multi_line_with_matcher(&matcher);
+        
+        // Walk through all files in current directory, respecting .gitignore
+        for result in Walk::new(&current_dir) {
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(_) => continue, // Skip entries with errors
+            };
+            
+            // Skip directories
+            if entry.path().is_dir() {
+                continue;
+            }
+            
+            let path = entry.path();
+            
+            // Get relative path for display
+            let file_path = match path.strip_prefix(&current_dir) {
+                Ok(rel_path) => rel_path.to_string_lossy().to_string(),
+                Err(_) => path.to_string_lossy().to_string(),
+            };
+            
+            // Search for matches in the file
+            let _ = searcher.search_path(&matcher, path, UTF8(|line_number, line| {
+                // Find match column position
+                if let Some(grep_match) = matcher.find(line.as_bytes())? {
+                    let start = grep_match.start();
+                    let col = start;
+                    
+                    // Extract matched text
+                    let end = std::cmp::min(start + self.query.len(), line.len());
+                    let matched_text = &line[start..end];
+                    
+                    // Create result entry
+                    let result = TokenSearchResult {
+                        file_path: file_path.clone(),
+                        line_number: line_number as usize,
+                        column: col,
+                        line_content: line.trim_end().to_string(),
+                        matched_text: matched_text.to_string(),
+                    };
+                    
+                    results.push(result);
+                }
+                
+                // Always return Ok to continue searching
+                Ok(true)
+            }));
+            
+            // Limit results for performance (check periodically)
+            if results.len() > 1000 {
+                break;
+            }
+        }
+        
+        // Store results
+        self.results = results;
+        
+        Ok(())
+    }
 }
 
 impl Editor {
@@ -129,6 +301,7 @@ impl Editor {
             current_tab: 0,
             mode: Mode::FileFinder,
             file_finder: FileFinder::new(),
+            token_search: TokenSearch::new(),
             config,
             save_and_quit: false,
             command_text: String::new(),
@@ -333,8 +506,18 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
     
     /// Load file in a new tab
     pub fn load_file_in_new_tab(&mut self, path: &str) -> Result<()> {
-        self.add_tab();
-        self.load_file(path)
+        // Check if a tab already exists with this file
+        if let Some(tab_index) = self.tabs.iter().position(|tab| 
+            tab.buffer.file_path.as_ref().map_or(false, |f| f == path)
+        ) {
+            // If tab exists, switch to it
+            self.current_tab = tab_index;
+            Ok(())
+        } else {
+            // Create a new tab and load the file
+            self.add_tab();
+            self.load_file(path)
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -347,6 +530,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             Mode::WriteConfirm => self.handle_write_confirm_mode(key),
             Mode::FilenamePrompt => self.handle_filename_prompt_mode(key),
             Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
+            Mode::TokenSearch => self.handle_token_search_mode(key),
             // Visual mode with character selection
             Mode::Visual => {
                 use crossterm::event::KeyCode;
@@ -430,6 +614,135 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 }
             },
         }
+    }
+    
+    /// Handle key events in token search mode
+    fn handle_token_search_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        let bindings = &self.config.key_bindings.token_search_mode;
+        
+        // Check bindings first
+        for (command, binding) in bindings {
+            if binding.matches(&key) {
+                match command.as_str() {
+                    "cancel" => {
+                        // Exit token search mode
+                        self.mode = Mode::Normal;
+                        return Ok(true);
+                    },
+                    "select" => {
+                        // Navigate to the selected search result
+                        if let Some(result) = self.token_search.get_selected_cloned() {
+                            // Check if we need to load a different file
+                            let current_file = self.current_tab().buffer.file_path.clone();
+                            
+                            if current_file.as_ref().map(|p| p != &result.file_path).unwrap_or(true) {
+                                // Load the file that contains the match
+                                self.load_file_in_new_tab(&result.file_path)?;
+                            }
+                            
+                            // Position cursor at the match location
+                            let tab = self.current_tab_mut();
+                            tab.cursor.y = result.line_number;
+                            tab.cursor.x = result.column;
+                            
+                            // Position the line with better context (not at the top edge)
+                            // Try to position the line at 1/3 of the viewport height from the top
+                            let desired_offset = tab.viewport.height / 3;
+                            if result.line_number > desired_offset {
+                                tab.viewport.top_line = result.line_number - desired_offset;
+                            } else {
+                                tab.viewport.top_line = 0;
+                            }
+                            
+                            // Ensure the matched line is visible
+                            self.update_viewport();
+                            
+                            // Switch back to normal mode
+                            self.mode = Mode::Normal;
+                        }
+                        return Ok(true);
+                    },
+                    "next" => {
+                        self.token_search.next();
+                        return Ok(true);
+                    },
+                    "previous" => {
+                        self.token_search.previous();
+                        return Ok(true);
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        // Default handling for keys not bound in key_bindings
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                // Exit token search mode
+                self.mode = Mode::Normal;
+            },
+            KeyCode::Enter => {
+                // Navigate to the selected search result
+                if let Some(result) = self.token_search.get_selected_cloned() {
+                    // Check if we need to load a different file
+                    let current_file = self.current_tab().buffer.file_path.clone();
+                    
+                    if current_file.as_ref().map(|p| p != &result.file_path).unwrap_or(true) {
+                        // Load the file that contains the match
+                        self.load_file_in_new_tab(&result.file_path)?;
+                    }
+                    
+                    // Position cursor at the match location
+                    let tab = self.current_tab_mut();
+                    tab.cursor.y = result.line_number;
+                    tab.cursor.x = result.column;
+                    
+                    // Position the line with better context (not at the top edge)
+                    // Try to position the line at 1/3 of the viewport height from the top
+                    let desired_offset = tab.viewport.height / 3;
+                    if result.line_number > desired_offset {
+                        tab.viewport.top_line = result.line_number - desired_offset;
+                    } else {
+                        tab.viewport.top_line = 0;
+                    }
+                    
+                    // Ensure the matched line is visible
+                    self.update_viewport();
+                    
+                    // Switch back to normal mode
+                    self.mode = Mode::Normal;
+                }
+            },
+            KeyCode::Char(c) => {
+                // Add character to search
+                self.token_search.add_char(c);
+                
+                // Perform the search with the updated query
+                // Use a small delay for better UX if typing quickly
+                if self.token_search.query.len() > 2 {
+                    let _ = self.token_search.search();
+                }
+            },
+            KeyCode::Backspace => {
+                // Remove character from search
+                self.token_search.remove_char();
+                
+                // Update search results if query is not empty
+                if !self.token_search.query.is_empty() && self.token_search.query.len() > 2 {
+                    let _ = self.token_search.search();
+                }
+            },
+            KeyCode::Down => {
+                self.token_search.next();
+            },
+            KeyCode::Up => {
+                self.token_search.previous();
+            },
+            _ => {}
+        }
+        
+        Ok(true)
     }
     
     fn handle_write_confirm_mode(&mut self, key: KeyEvent) -> Result<bool> {
@@ -776,6 +1089,11 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         self.mode = Mode::FileFinder;
                         self.file_finder.refresh()?;
                     },
+                    "token_search" => {
+                        // Enter token search mode
+                        self.mode = Mode::TokenSearch;
+                        self.token_search = TokenSearch::new();
+                    },
                     _ => {}
                 }
                 return Ok(true);
@@ -891,6 +1209,11 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::FileFinder;
                 self.file_finder.refresh()?;
+            },
+            // Token search with Ctrl+T
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.mode = Mode::TokenSearch;
+                self.token_search = TokenSearch::new();
             },
             // Paste clipboard after cursor (p key)
             KeyCode::Char('p') if !key.modifiers.contains(KeyModifiers::CONTROL) && 
