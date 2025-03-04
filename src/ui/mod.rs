@@ -1,13 +1,13 @@
 use tui::{
     backend::Backend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
-use crate::editor::{Editor, Mode, HighlightedLine, Tab};
+use crate::editor::{Editor, Mode, HighlightedLine, Tab, GameState, Position};
 use std::collections::HashMap;
 use syntect::highlighting::Style as SyntectStyle;
 
@@ -65,6 +65,14 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
             // In Visual modes, highlight the selection
             viewport_update = render_editor_area_with_selection(f, editor, chunks[1]);
         },
+        Mode::Snake => {
+            // In Snake mode, render the snake game
+            render_snake_game(f, editor, chunks[1]);
+            // Update snake game state if needed
+            if let Some(snake) = &mut editor.snake_game {
+                snake.update();
+            }
+        },
         _ => {
             viewport_update = render_editor_area(f, editor, chunks[1]);
         }
@@ -72,6 +80,142 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &mut Editor) -> Option<Viewp
     
     // Render status line
     render_status_line(f, editor, chunks[2]);
+    
+    // Helper function to create a centered rect using up certain percentage of the available rect
+    fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+        let popup_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - percent_y) / 2),
+                    Constraint::Percentage(percent_y),
+                    Constraint::Percentage((100 - percent_y) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(r);
+
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - percent_x) / 2),
+                    Constraint::Percentage(percent_x),
+                    Constraint::Percentage((100 - percent_x) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(popup_layout[1])[1]
+    }
+    
+    /// Render the snake game
+    fn render_snake_game<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+        if let Some(snake) = &editor.snake_game {
+            // Create a block for the snake game
+            let game_block = Block::default()
+                .title(" Snake Game ")
+                .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Green));
+            
+            let inner_area = game_block.inner(area);
+            f.render_widget(game_block, area);
+            
+            // Create a canvas for the game area
+            let mut cells = vec![vec![' '; inner_area.width as usize]; inner_area.height as usize];
+            
+            // Render snake body
+            for segment in snake.body() {
+                if segment.x < inner_area.width as usize && segment.y < inner_area.height as usize {
+                    cells[segment.y][segment.x] = '█';
+                }
+            }
+            
+            // Render food
+            let food = snake.food();
+            if food.x < inner_area.width as usize && food.y < inner_area.height as usize {
+                cells[food.y][food.x] = '●';
+            }
+            
+            // Create lines from cells
+            let lines: Vec<Line> = cells.iter().map(|row| {
+                let spans: Vec<Span> = row.iter().map(|&cell| {
+                    match cell {
+                        '█' => Span::styled(
+                            cell.to_string(),
+                            Style::default().fg(Color::Green),
+                        ),
+                        '●' => Span::styled(
+                            cell.to_string(),
+                            Style::default().fg(Color::Red),
+                        ),
+                        _ => Span::raw(cell.to_string()),
+                    }
+                }).collect();
+                Line::from(spans)
+            }).collect();
+            
+            let paragraph = Paragraph::new(lines)
+                .alignment(Alignment::Left);
+            
+            f.render_widget(paragraph, inner_area);
+            
+            // Render game state if not playing
+            match snake.state() {
+                GameState::GameOver => {
+                    let game_over_text = format!("Game Over! Score: {}", snake.score());
+                    let game_over_area = centered_rect(40, 20, inner_area);
+                    
+                    let game_over_block = Block::default()
+                        .title(" GAME OVER ")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Red));
+                    
+                    let game_over_inner = game_over_block.inner(game_over_area);
+                    f.render_widget(game_over_block, game_over_area);
+                    
+                    let game_over_paragraph = Paragraph::new(vec![
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            game_over_text,
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        )),
+                        Line::from(""),
+                        Line::from("Press 'r' to restart or ESC to exit"),
+                    ])
+                    .alignment(Alignment::Center);
+                    
+                    f.render_widget(game_over_paragraph, game_over_inner);
+                },
+                GameState::Won => {
+                    let win_text = format!("You Won! Score: {}", snake.score());
+                    let win_area = centered_rect(40, 20, inner_area);
+                    
+                    let win_block = Block::default()
+                        .title(" VICTORY ")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Green));
+                    
+                    let win_inner = win_block.inner(win_area);
+                    f.render_widget(win_block, win_area);
+                    
+                    let win_paragraph = Paragraph::new(vec![
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            win_text,
+                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        )),
+                        Line::from(""),
+                        Line::from("Press 'r' to restart or ESC to exit"),
+                    ])
+                    .alignment(Alignment::Center);
+                    
+                    f.render_widget(win_paragraph, win_inner);
+                },
+                _ => {},
+            }
+        }
+    }
     
     viewport_update
 }
@@ -1800,6 +1944,17 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::DiagnosticsPanel => "DIAGNOSTICS".to_string(),
         Mode::Visual => "VISUAL".to_string(),
         Mode::VisualLine => "VISUAL LINE".to_string(),
+        Mode::Snake => {
+            if let Some(snake) = &editor.snake_game {
+                match snake.state() {
+                    GameState::Playing => format!("SNAKE | Score: {}", snake.score()),
+                    GameState::GameOver => format!("SNAKE | GAME OVER! | Score: {}", snake.score()),
+                    GameState::Won => format!("SNAKE | YOU WON! | Score: {}", snake.score()),
+                }
+            } else {
+                "SNAKE GAME".to_string()
+            }
+        },
     };
     
     let status = match editor.mode {
@@ -1807,6 +1962,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::TokenSearch => format!("{} | Press Enter to go to selection, Esc to cancel", mode_text),
         Mode::FilenamePrompt => format!("{} | Press Enter to save, Esc to cancel", mode_text),
         Mode::DiagnosticsPanel => format!("{} | Press Enter to go to selected error, n/p for next/prev, Esc to exit", mode_text),
+        Mode::Snake => format!("{} | Use h,j,k,l or arrow keys to move | r: restart | q/ESC: exit", mode_text),
         Mode::WriteConfirm => {
             // Get current file info for write confirmation
             let file_info = if let Some(path) = &editor.current_tab().buffer.file_path {

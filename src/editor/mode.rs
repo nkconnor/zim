@@ -25,4 +25,6 @@ pub enum Mode {
     Visual,
     /// Visual Line mode (for line-based selections)
     VisualLine,
+    /// Snake game mode (easter egg)
+    Snake,
 }

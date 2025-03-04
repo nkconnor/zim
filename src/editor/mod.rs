@@ -5,6 +5,7 @@ mod file_finder;
 mod viewport;
 mod diagnostics;
 mod syntax;
+mod snake;
 
 pub use buffer::Buffer;
 pub use cursor::Cursor;
@@ -13,6 +14,7 @@ pub use file_finder::FileFinder;
 pub use viewport::Viewport;
 pub use diagnostics::{DiagnosticSeverity, DiagnosticCollection};
 pub use syntax::{SyntaxHighlighter, HighlightedLine};
+pub use snake::{Snake, Direction, GameState, Position};
 
 use anyhow::Result;
 use crossterm::event::KeyEvent;
@@ -114,6 +116,8 @@ pub struct Editor {
     pub clipboard: String,
     /// Selected diagnostic index for the diagnostics panel
     pub selected_diagnostic_index: usize,
+    /// Snake game instance (Easter egg)
+    pub snake_game: Option<Snake>,
 }
 
 use grep::matcher::Matcher;
@@ -313,6 +317,7 @@ impl Editor {
             highlighted_lines_cache: HashMap::new(),
             clipboard: String::new(),
             selected_diagnostic_index: 0,
+            snake_game: None,
         };
         
         // Refresh file finder to populate files list
@@ -660,6 +665,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             Mode::ReloadConfirm => self.handle_reload_confirm_mode(key),
             Mode::TokenSearch => self.handle_token_search_mode(key),
             Mode::DiagnosticsPanel => self.handle_diagnostics_panel_mode(key),
+            Mode::Snake => self.handle_snake_mode(key),
             // Visual mode with character selection
             Mode::Visual => {
                 use crossterm::event::KeyCode;
@@ -743,6 +749,57 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 }
             },
         }
+    }
+    
+    /// Handle key events in snake game mode
+    fn handle_snake_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        
+        if let Some(snake) = &mut self.snake_game {
+            match key.code {
+                KeyCode::Esc => {
+                    // Exit snake game
+                    self.snake_game = None;
+                    self.mode = Mode::Normal;
+                },
+                KeyCode::Char('q') => {
+                    // Exit snake game
+                    self.snake_game = None;
+                    self.mode = Mode::Normal;
+                },
+                KeyCode::Char('r') => {
+                    // Reset game
+                    snake.reset();
+                },
+                KeyCode::Up | KeyCode::Char('k') => {
+                    snake.change_direction(Direction::Up);
+                },
+                KeyCode::Down | KeyCode::Char('j') => {
+                    snake.change_direction(Direction::Down);
+                },
+                KeyCode::Left | KeyCode::Char('h') => {
+                    snake.change_direction(Direction::Left);
+                },
+                KeyCode::Right | KeyCode::Char('l') => {
+                    snake.change_direction(Direction::Right);
+                },
+                _ => {}
+            }
+        }
+        
+        Ok(true)
+    }
+    
+    /// Start the snake game
+    pub fn start_snake_game(&mut self) {
+        // Get viewport dimensions for game area
+        let tab = self.current_tab();
+        let width = tab.viewport.width;
+        let height = tab.viewport.height;
+        
+        // Create a new snake game
+        self.snake_game = Some(Snake::new(width, height));
+        self.mode = Mode::Snake;
     }
     
     /// Handle key events in token search mode
@@ -1130,6 +1187,10 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                         // Make sure save_and_quit flag is reset
                         self.save_and_quit = false;
                     },
+                    "snake_game" => {
+                        // Easter egg: Start snake game
+                        self.start_snake_game();
+                    },
                     "reload_file" => {
                         // Shortcut for reloading file (directly from normal mode)
                         if let Some(path) = &self.current_tab().buffer.file_path.clone() {
@@ -1303,6 +1364,7 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             KeyCode::Char('q') => return Ok(false),
             KeyCode::Char('i') => self.mode = Mode::Insert,
             KeyCode::Char(':') => self.mode = Mode::Command,
+            KeyCode::Char('s') => self.start_snake_game(),
             // Add explicit handling for w (write/save)
             KeyCode::Char('w') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Enter write confirmation mode
