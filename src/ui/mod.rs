@@ -1375,9 +1375,9 @@ fn render_token_search<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect
     if results.is_empty() {
         // Show a message when there are no results
         let help_text = if editor.token_search.query.is_empty() {
-            "Type to search for tokens in your code"
+            "Type to search for tokens in your code\nPress Ctrl+h for help"
         } else if editor.token_search.query.len() < 3 {
-            "Enter at least 3 characters to search"
+            "Enter at least 3 characters to search\nPress Ctrl+h for help"
         } else {
             "No matching results found"
         };
@@ -1498,6 +1498,11 @@ fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
                 Span::styled("Type to search for files or use arrow keys to navigate", 
                     Style::default().fg(Color::Gray)),
             ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press Ctrl+h for help", 
+                    Style::default().fg(Color::Yellow)),
+            ]),
         ];
         
         let welcome_paragraph = Paragraph::new(welcome_text)
@@ -1595,8 +1600,9 @@ fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
 
 fn render_help_page<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     let help_block = Block::default()
-        .title(" Help - Press ESC to exit ")
-        .borders(Borders::ALL);
+        .title(" Help - Press ESC or q to exit ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::LightBlue));
     
     let inner_area = help_block.inner(area);
     f.render_widget(help_block, area);
@@ -1604,168 +1610,169 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     // Create sections of help content
     let mut text = Vec::new();
     
-    // Title section
+    // Title section with modern styling
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "╔══════════════════════════════════════╗",
-            Style::default().fg(Color::Yellow)
-        )
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "║       ZIM EDITOR HELP GUIDE          ║",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-        )
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "╚══════════════════════════════════════╝",
-            Style::default().fg(Color::Yellow)
-        )
-    ]));
-    text.push(Line::from(""));
-    
-    // Normal Mode section
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "┏━━━━━━━━━━━━━━━━━━━━━┓",
-            Style::default().fg(Color::Green)
-        )
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "┃     NORMAL MODE     ┃",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-        )
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "┗━━━━━━━━━━━━━━━━━━━━━┛",
-            Style::default().fg(Color::Green)
-        )
-    ]));
-    text.push(Line::from(""));
-    
-    // Basic navigation
-    text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Basic Navigation:", Style::default().add_modifier(Modifier::BOLD))
-    ]));
-    text.push(Line::from("h, j, k, l - Move left, down, up, right"));
-    text.push(Line::from("^ - Move to start of line"));
-    text.push(Line::from("$ - Move to end of line"));
-    text.push(Line::from("g - Move to top of file"));
-    text.push(Line::from("G - Move to bottom of file"));
-    text.push(Line::from("Ctrl+b - Page up"));
-    text.push(Line::from("Ctrl+f - Page down"));
-    text.push(Line::from(""));
-    
-    // Editing
-    text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Editing:", Style::default().add_modifier(Modifier::BOLD))
-    ]));
-    text.push(Line::from("d - Delete current line"));
-    text.push(Line::from("x - Delete character at cursor and enter insert mode"));
-    text.push(Line::from("Backspace - In insert mode at line start, joins with previous line"));
-    text.push(Line::from(""));
-    
-    // Modes
-    text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Mode Switching:", Style::default().add_modifier(Modifier::BOLD))
-    ]));
-    text.push(Line::from("i - Enter Insert mode"));
-    text.push(Line::from(": - Enter Command mode"));
-    text.push(Line::from("ESC - Return to Normal mode (from any mode)"));
-    text.push(Line::from(""));
-    
-    // Tabs
-    text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Tab Management:", Style::default().add_modifier(Modifier::BOLD))
-    ]));
-    text.push(Line::from("Ctrl+n - New tab"));
-    text.push(Line::from("Ctrl+w - Close tab"));
-    text.push(Line::from("Ctrl+right - Next tab"));
-    text.push(Line::from("Ctrl+left - Previous tab"));
-    text.push(Line::from("F1-F12 - Switch directly to tabs 1-12"));
-    text.push(Line::from(""));
-    
-    // File operations
-    text.push(Line::from(vec![
-        tui::text::Span::styled("➤ File Operations:", Style::default().add_modifier(Modifier::BOLD))
-    ]));
-    text.push(Line::from("Ctrl+o - Open file (finder)"));
-    text.push(Line::from("q - Quit (in normal mode)"));
-    text.push(Line::from(""));
-    
-    // File Actions
-    text.push(Line::from(vec![
-        tui::text::Span::styled(
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            "╔═════════════════════════════════════════════╗",
             Style::default().fg(Color::Cyan)
         )
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "┃    DIRECT COMMANDS (Normal Mode)       ┃",
+            "║          ZIM EDITOR COMMAND REFERENCE       ║",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         )
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            "╚═════════════════════════════════════════════╝",
             Style::default().fg(Color::Cyan)
         )
     ]));
+    text.push(Line::from(""));
+    
+    // Essential Commands section
     text.push(Line::from(vec![
-        tui::text::Span::styled("w", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Save current file (prompts for confirmation, highlights changes)")
+        tui::text::Span::styled(
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            Style::default().fg(Color::Green)
+        )
     ]));
     text.push(Line::from(vec![
-        tui::text::Span::styled("e", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Reload current file from disk (prompts with diff highlighting)")
+        tui::text::Span::styled(
+            "┃     ESSENTIAL COMMANDS     ┃",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        )
     ]));
     text.push(Line::from(vec![
-        tui::text::Span::styled("X or ZZ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("    - Save and quit (prompts for confirmation)")
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled("q", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("         - Quit")
-    ]));
-    text.push(Line::from(vec![
-        tui::text::Span::styled(":q!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        tui::text::Span::raw("       - Force quit (discard changes)")
+        tui::text::Span::styled(
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            Style::default().fg(Color::Green)
+        )
     ]));
     text.push(Line::from(""));
     
-    // Cargo integration
+    // Mode switching commands
     text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Cargo Integration:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Mode Switching:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
     ]));
-    text.push(Line::from("Ctrl+d - Run cargo check"));
-    text.push(Line::from("Ctrl+y - Run cargo clippy"));
+    text.push(Line::from("ESC      - Return to Normal mode (from any mode)"));
+    text.push(Line::from("i        - Enter Insert mode"));
+    text.push(Line::from(":        - Enter Command mode"));
+    text.push(Line::from("v        - Enter Visual mode"));
+    text.push(Line::from("V        - Enter Visual Line mode"));
     text.push(Line::from(""));
     
-    // Help
+    // Basic navigation
     text.push(Line::from(vec![
-        tui::text::Span::styled("➤ Help and Search:", Style::default().add_modifier(Modifier::BOLD))
+        tui::text::Span::styled("➤ Navigation:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
     ]));
-    text.push(Line::from("Ctrl+h - Show this help page"));
-    text.push(Line::from("Ctrl+t - Search for code tokens across files"));
+    text.push(Line::from("h, j, k, l - Move left, down, up, right"));
+    text.push(Line::from("^        - Move to start of line"));
+    text.push(Line::from("$        - Move to end of line"));
+    text.push(Line::from("g        - Move to top of file"));
+    text.push(Line::from("G        - Move to bottom of file"));
+    text.push(Line::from("Ctrl+b   - Page up"));
+    text.push(Line::from("Ctrl+f   - Page down"));
+    text.push(Line::from(""));
+    
+    // File operations
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ File Operations:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+o   - Open file (finder)"));
+    text.push(Line::from("w        - Save current file"));
+    text.push(Line::from("e        - Reload file from disk"));
+    text.push(Line::from("q        - Quit editor"));
+    text.push(Line::from(":q!      - Force quit (discard changes)"));
+    text.push(Line::from("X or ZZ  - Save and quit"));
+    text.push(Line::from(""));
+    
+    // Tab management section
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Tab Management:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+n       - New tab"));
+    text.push(Line::from("Ctrl+w       - Close current tab"));
+    text.push(Line::from("Ctrl+right   - Next tab"));
+    text.push(Line::from("Ctrl+left    - Previous tab"));
+    text.push(Line::from("F1-F12       - Switch directly to tabs 1-12"));
+    text.push(Line::from(""));
+    
+    // Editing section
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Editing:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("d        - Delete current line"));
+    text.push(Line::from("x        - Delete character at cursor and enter insert mode"));
+    text.push(Line::from("y        - Yank (copy) selection or line"));
+    text.push(Line::from("p        - Paste clipboard content"));
+    text.push(Line::from("Backspace - Delete character or join with previous line"));
+    text.push(Line::from(""));
+    
+    // Search & Diagnostics
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Search & Diagnostics:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+t   - Search for code tokens across files"));
+    text.push(Line::from("Ctrl+e   - Open diagnostics panel"));
+    text.push(Line::from("n/p      - Navigate to next/previous diagnostic"));
+    text.push(Line::from(""));
+    
+    // Development & Integration
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Development:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+d   - Run cargo check and show diagnostics"));
+    text.push(Line::from("Ctrl+y   - Run cargo clippy and show diagnostics"));
+    text.push(Line::from(""));
+    
+    // Help and Access
+    text.push(Line::from(vec![
+        tui::text::Span::styled("➤ Help and Documentation:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    ]));
+    text.push(Line::from("Ctrl+h   - Show this help page"));
     text.push(Line::from("ESC or q - Exit help and return to normal mode"));
+    
+    // Visual Mode section
+    text.push(Line::from(""));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            Style::default().fg(Color::Magenta)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┃     VISUAL MODE COMMANDS   ┃",
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+        )
+    ]));
+    text.push(Line::from(vec![
+        tui::text::Span::styled(
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            Style::default().fg(Color::Magenta)
+        )
+    ]));
+    text.push(Line::from(""));
+    text.push(Line::from("h, j, k, l - Extend selection"));
+    text.push(Line::from("ESC        - Return to normal mode"));
+    text.push(Line::from("y          - Yank (copy) selected text"));
+    text.push(Line::from("d          - Delete selected text"));
     
     // Render the help text
     // Add footer
     text.push(Line::from(""));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "════════════════════════════════════════",
-            Style::default().fg(Color::Yellow)
+            "═════════════════════════════════════════════",
+            Style::default().fg(Color::Cyan)
         )
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "   Zim: A modern, fast text editor      ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC)
+            "    Zim: A modern, fast terminal text editor    ",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)
         )
     ]));
     
