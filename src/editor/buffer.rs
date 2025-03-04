@@ -123,9 +123,8 @@ impl Buffer {
     }
     
     /// Save the buffer content to a file
-    pub fn save(&self, path: Option<&str>) -> Result<String> {
+    pub fn save(&mut self, path: Option<&str>) -> Result<String> {
         use std::fs;
-        use std::path::Path;
         
         let file_path = match path {
             // Use provided path if given
@@ -143,12 +142,7 @@ impl Buffer {
         
         // Update file path if it was newly set
         if path.is_some() {
-            // Use unsafe to get mutable reference to self
-            // This is safe because we're just updating the path
-            unsafe {
-                let this = self as *const Buffer as *mut Buffer;
-                (*this).file_path = Some(file_path.clone());
-            }
+            self.file_path = Some(file_path.clone());
         }
         
         // Return the path that was saved to

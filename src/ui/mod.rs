@@ -9,11 +9,15 @@ use tui::{
 
 use crate::editor::{Editor, Mode};
 
-// Command text for displaying in the UI
-pub static mut COMMAND_TEXT: String = String::new();
+/// Holds information about viewport dimensions that need to be updated
+pub struct ViewportUpdate {
+    pub width: usize,
+    pub height: usize,
+}
 
-pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
+pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) -> Option<ViewportUpdate> {
     let size = f.size();
+    let mut viewport_update = None;
 
     // Create the layout with tab bar (increased height)
     let chunks = Layout::default()
@@ -38,12 +42,14 @@ pub fn render<B: Backend>(f: &mut Frame<B>, editor: &Editor) {
             render_help_page(f, editor, chunks[1]);
         },
         _ => {
-            render_editor_area(f, editor, chunks[1]);
+            viewport_update = render_editor_area(f, editor, chunks[1]);
         }
     }
     
     // Render status line
     render_status_line(f, editor, chunks[2]);
+    
+    viewport_update
 }
 
 /// Render the tab bar
@@ -134,7 +140,7 @@ fn render_tab_bar<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     f.render_widget(tabs_paragraph, inner_area);
 }
 
-fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
+fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) -> Option<ViewportUpdate> {
     // Get the current tab
     let tab = editor.current_tab();
     
@@ -154,14 +160,6 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
     let content_width = inner_area.width.saturating_sub(line_number_width);
     
     viewport.update_dimensions(content_width as usize, inner_area.height as usize);
-    
-    // Sync dimensions with editor's viewport, but not the scroll position
-    if let Some(editor_mut) = unsafe { (editor as *const Editor as *mut Editor).as_mut() } {
-        if let Some(tab_mut) = editor_mut.tabs.get_mut(editor_mut.current_tab) {
-            tab_mut.viewport.width = viewport.width;
-            tab_mut.viewport.height = viewport.height;
-        }
-    }
     
     // Calculate visible range
     let (start_line, end_line) = viewport.get_visible_range(tab.buffer.line_count());
@@ -290,6 +288,12 @@ fn render_editor_area<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         area.x + cursor_x as u16 + line_number_offset as u16 + 1, // +1 for the border
         area.y + cursor_y as u16 + 1, // +1 for the border
     );
+    
+    // Return viewport dimensions for safe update
+    Some(ViewportUpdate {
+        width: viewport.width,
+        height: viewport.height,
+    })
 }
 
 fn render_file_finder<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
@@ -450,31 +454,30 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, _editor: &Editor, area: Rect) 
     text.push(Line::from("q - Quit (in normal mode)"));
     text.push(Line::from(""));
     
-    // Command mode
+    // File Actions
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
             Style::default().fg(Color::Cyan)
         )
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "┃     COMMAND MODE (Type : to enter)     ┃",
+            "┃    DIRECT COMMANDS (Normal Mode)       ┃",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         )
     ]));
     text.push(Line::from(vec![
         tui::text::Span::styled(
-            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
             Style::default().fg(Color::Cyan)
         )
     ]));
-    text.push(Line::from("w            - Save current file"));
-    text.push(Line::from("w filename   - Save to a new filename"));
-    text.push(Line::from("wq           - Save and quit"));
-    text.push(Line::from("wq filename  - Save to a new filename and quit"));
-    text.push(Line::from("q            - Quit"));
-    text.push(Line::from("q!           - Force quit (discard changes)"));
+    text.push(Line::from("w         - Save current file (prompts for confirmation)"));
+    text.push(Line::from("e         - Reload current file from disk"));
+    text.push(Line::from("x         - Save and quit (prompts for confirmation)"));
+    text.push(Line::from("q         - Quit"));
+    text.push(Line::from("q!        - Force quit (discard changes)"));
     text.push(Line::from(""));
     
     // Cargo integration
@@ -521,15 +524,28 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::Normal => "NORMAL".to_string(),
         Mode::Insert => "INSERT".to_string(),
         Mode::Command => {
-            let cmd = unsafe { COMMAND_TEXT.clone() };
-            format!(":{}", cmd)
+            format!(":{}", editor.command_text)
         },
         Mode::FileFinder => "FILE FINDER".to_string(),
         Mode::Help => "HELP".to_string(),
+        Mode::WriteConfirm => "WRITE? (y/n)".to_string(),
     };
     
     let status = match editor.mode {
         Mode::FileFinder => format!("{} | Press Enter to select, Esc to cancel", mode_text),
+        Mode::WriteConfirm => {
+            // Get current file info for write confirmation
+            let file_info = if let Some(path) = &editor.current_tab().buffer.file_path {
+                if path.starts_with("untitled-") {
+                    "No filename specified".to_string()
+                } else {
+                    path.clone()
+                }
+            } else {
+                "No filename specified".to_string()
+            };
+            format!("{} | Save file: {} | Press Y to confirm, N to cancel", mode_text, file_info)
+        },
         _ => {
             // Get current tab info
             let tab = editor.current_tab();

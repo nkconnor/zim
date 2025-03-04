@@ -11,4 +11,6 @@ pub enum Mode {
     FileFinder,
     /// Help mode (displays keyboard shortcuts and help information)
     Help,
+    /// Write confirmation mode (for confirming file write)
+    WriteConfirm,
 }

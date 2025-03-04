@@ -85,7 +85,10 @@ impl Default for KeyBindings {
         let mut normal_mode = HashMap::new();
         normal_mode.insert("quit".to_string(), KeyBinding::new("q"));
         normal_mode.insert("insert_mode".to_string(), KeyBinding::new("i"));
-        normal_mode.insert("command_mode".to_string(), KeyBinding::new(":"));
+        // Direct file operations without command mode
+        normal_mode.insert("save_file".to_string(), KeyBinding::new("w"));
+        normal_mode.insert("reload_file".to_string(), KeyBinding::new("e"));
+        normal_mode.insert("save_and_quit".to_string(), KeyBinding::new("x"));
         normal_mode.insert("move_left".to_string(), KeyBinding::new("h"));
         normal_mode.insert("move_down".to_string(), KeyBinding::new("j"));
         normal_mode.insert("move_up".to_string(), KeyBinding::new("k"));

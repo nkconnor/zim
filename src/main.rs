@@ -31,7 +31,19 @@ fn run_app(
     mut editor: Editor,
 ) -> Result<()> {
     loop {
-        terminal.draw(|f| ui::render(f, &editor))?;
+        // Draw UI and collect any viewport updates
+        let mut viewport_update = None;
+        terminal.draw(|f| {
+            viewport_update = ui::render(f, &editor);
+        })?;
+        
+        // Apply viewport updates if needed (safely updates viewport dimensions)
+        if let Some(update) = viewport_update {
+            if let Some(tab) = editor.tabs.get_mut(editor.current_tab) {
+                tab.viewport.width = update.width;
+                tab.viewport.height = update.height;
+            }
+        }
 
         if crossterm::event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
