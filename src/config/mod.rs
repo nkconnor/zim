@@ -76,31 +76,46 @@ impl Default for Theme {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let config_dir = get_config_dir()?;
+        let config_dir = get_config_dir();
+        
+        // Just return default config if we can't get config directory
+        if config_dir.is_err() {
+            return Ok(Config::default());
+        }
+        
+        let config_dir = config_dir?;
         let config_path = config_dir.join("config.toml");
 
         if config_path.exists() {
-            let config_str = fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read config file: {:?}", config_path))?;
+            // Try to read and parse existing config, fall back to default on error
+            let config_str = match fs::read_to_string(&config_path) {
+                Ok(s) => s,
+                Err(_) => return Ok(Config::default()),
+            };
             
-            let config = toml::from_str(&config_str)
-                .with_context(|| format!("Failed to parse config file: {:?}", config_path))?;
+            let config = match toml::from_str(&config_str) {
+                Ok(c) => c,
+                Err(_) => return Ok(Config::default()),
+            };
             
             Ok(config)
         } else {
             // Create default config
             let config = Config::default();
             
-            // Ensure config directory exists
-            fs::create_dir_all(&config_dir)
-                .with_context(|| format!("Failed to create config directory: {:?}", config_dir))?;
+            // Try to create config directory and file, but don't fail if we can't
+            if let Err(_) = fs::create_dir_all(&config_dir) {
+                return Ok(config);
+            }
             
-            // Write default config
-            let config_str = toml::to_string_pretty(&config)
-                .with_context(|| "Failed to serialize config")?;
+            // Format config to TOML
+            let config_str = match toml::to_string_pretty(&config) {
+                Ok(s) => s,
+                Err(_) => return Ok(config),
+            };
             
-            fs::write(&config_path, config_str)
-                .with_context(|| format!("Failed to write config file: {:?}", config_path))?;
+            // Write config file, but don't fail if we can't
+            let _ = fs::write(&config_path, config_str);
             
             Ok(config)
         }

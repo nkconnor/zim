@@ -216,34 +216,46 @@ pub fn get_config_dir() -> Result<PathBuf> {
 
 impl KeyBindings {
     pub fn load() -> Result<Self> {
-        let config_dir = get_config_dir()?;
+        let config_dir = get_config_dir();
+        
+        // Just return default bindings if we can't get config directory
+        if config_dir.is_err() {
+            return Ok(KeyBindings::default());
+        }
+        
+        let config_dir = config_dir?;
         let bindings_path = config_dir.join("key_bindings.toml");
 
         if bindings_path.exists() {
-            let bindings_str = fs::read_to_string(&bindings_path).with_context(|| {
-                format!("Failed to read key bindings file: {:?}", bindings_path)
-            })?;
+            // Try to read and parse existing bindings, fall back to default on error
+            let bindings_str = match fs::read_to_string(&bindings_path) {
+                Ok(s) => s,
+                Err(_) => return Ok(KeyBindings::default()),
+            };
 
-            let bindings = toml::from_str(&bindings_str).with_context(|| {
-                format!("Failed to parse key bindings file: {:?}", bindings_path)
-            })?;
+            let bindings = match toml::from_str(&bindings_str) {
+                Ok(b) => b,
+                Err(_) => return Ok(KeyBindings::default()),
+            };
 
             Ok(bindings)
         } else {
             // Create default bindings
             let bindings = KeyBindings::default();
 
-            // Ensure config directory exists
-            fs::create_dir_all(&config_dir)
-                .with_context(|| format!("Failed to create config directory: {:?}", config_dir))?;
+            // Try to create config directory and file, but don't fail if we can't
+            if let Err(_) = fs::create_dir_all(&config_dir) {
+                return Ok(bindings);
+            }
 
-            // Write default bindings
-            let bindings_str = toml::to_string_pretty(&bindings)
-                .with_context(|| "Failed to serialize key bindings")?;
+            // Format bindings to TOML
+            let bindings_str = match toml::to_string_pretty(&bindings) {
+                Ok(s) => s,
+                Err(_) => return Ok(bindings),
+            };
 
-            fs::write(&bindings_path, bindings_str).with_context(|| {
-                format!("Failed to write key bindings file: {:?}", bindings_path)
-            })?;
+            // Write bindings file, but don't fail if we can't
+            let _ = fs::write(&bindings_path, bindings_str);
 
             Ok(bindings)
         }
