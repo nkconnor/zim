@@ -6,6 +6,7 @@ use similar::{ChangeTag, TextDiff};
 use syntect::parsing::SyntaxReference;
 use std::sync::Arc;
 use std::cmp::{min, max};
+use super::history::{History, EditorAction, ActionType};
 
 pub struct Buffer {
     pub lines: Vec<String>,
@@ -14,6 +15,7 @@ pub struct Buffer {
     pub is_modified: bool,
     pub syntax: Option<Arc<SyntaxReference>>,
     pub selection_start: Option<(usize, usize)>, // (line, column)
+    pub history: History,
 }
 
 impl Buffer {
@@ -25,12 +27,406 @@ impl Buffer {
             is_modified: false,
             syntax: None,
             selection_start: None,
+            history: History::new(),
         }
     }
     
     /// Start a selection at the current cursor position
     pub fn start_selection(&mut self, position: (usize, usize)) {
         self.selection_start = Some(position);
+    }
+    
+    /// Undo the last action
+    pub fn undo(&mut self, cursor: &mut Cursor) -> bool {
+        self.history.start_undo_or_redo();
+        
+        let result = if let Some(action) = self.history.undo_action() {
+            // Store the cursor position from before the action
+            *cursor = action.cursor_before;
+            
+            match action.action_type {
+                ActionType::InsertChar { x, y, c: _ } => {
+                    // To undo an insert, we delete the character
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x < line.len() {
+                            line.remove(x);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteChar { x, y, c } => {
+                    // To undo a delete, we insert the character
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x <= line.len() {
+                            line.insert(x, c);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::InsertNewline { x: _, y, remaining_text } => {
+                    // To undo a newline, we join the current line with the next one
+                    if y < self.lines.len() && y + 1 < self.lines.len() {
+                        let current_line = &mut self.lines[y];
+                        // Append the remaining text back to the line
+                        *current_line = format!("{}{}", current_line, remaining_text);
+                        
+                        // Remove the next line
+                        self.lines.remove(y + 1);
+                        
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteLine { y, content } => {
+                    // To undo a line deletion, we insert the line back
+                    if y <= self.lines.len() {
+                        self.lines.insert(y, content);
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::JoinLines { y, column_pos } => {
+                    // To undo joining lines, we split the line again
+                    if y < self.lines.len() {
+                        // Make a copy of the line to avoid borrowing issues
+                        let line = self.lines[y].clone();
+                        if column_pos <= line.len() {
+                            let (before, after) = line.split_at(column_pos);
+                            self.lines[y] = before.to_string();
+                            self.lines.insert(y + 1, after.to_string());
+                            self.mark_line_modified(y);
+                            self.mark_line_modified(y + 1);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::ReplaceSelection { old_text, selection_start, selection_end, .. } => {
+                    // To undo a selection replacement, we need to:
+                    // 1. Delete the current text in the selection area
+                    // 2. Insert the original text
+                    
+                    let (start_line, start_col) = selection_start;
+                    let (end_line, end_col) = selection_end;
+                    
+                    // Set the cursor to the beginning of the selection
+                    cursor.y = start_line;
+                    cursor.x = start_col;
+                    
+                    if self.delete_between(start_line, start_col, end_line, end_col) {
+                        // Now insert the original text
+                        self.insert_text_at_cursor(old_text, cursor);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::SetContent { old_lines, .. } => {
+                    // To undo setting content, we restore the old lines
+                    self.lines = old_lines;
+                    
+                    // Mark all lines as modified
+                    self.modified_lines.clear();
+                    for i in 0..self.lines.len() {
+                        self.modified_lines.insert(i);
+                    }
+                    
+                    self.is_modified = true;
+                    true
+                },
+            }
+        } else {
+            false
+        };
+        
+        self.history.end_undo_or_redo();
+        result
+    }
+    
+    /// Redo the previously undone action
+    pub fn redo(&mut self, cursor: &mut Cursor) -> bool {
+        self.history.start_undo_or_redo();
+        
+        let result = if let Some(action) = self.history.redo_action() {
+            // Set the cursor to the position from before the action
+            *cursor = action.cursor_before;
+            
+            match action.action_type {
+                ActionType::InsertChar { x, y, c } => {
+                    // To redo an insert, we insert the character again
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x <= line.len() {
+                            line.insert(x, c);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            
+                            // Update cursor position
+                            cursor.x = x + 1;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteChar { x, y, .. } => {
+                    // To redo a delete, we delete the character again
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x < line.len() {
+                            line.remove(x);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::InsertNewline { x, y, .. } => {
+                    // To redo a newline, we split the line again
+                    if y < self.lines.len() {
+                        let line = &self.lines[y].clone();
+                        if x <= line.len() {
+                            let (before, after) = line.split_at(x);
+                            self.lines[y] = before.to_string();
+                            self.lines.insert(y + 1, after.to_string());
+                            self.mark_line_modified(y);
+                            self.mark_line_modified(y + 1);
+                            self.is_modified = true;
+                            
+                            // Update cursor position
+                            cursor.y = y + 1;
+                            cursor.x = 0;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteLine { y, .. } => {
+                    // To redo a line deletion, we delete the line again
+                    if y < self.lines.len() {
+                        self.lines.remove(y);
+                        if y < self.lines.len() {
+                            self.mark_line_modified(y);
+                        }
+                        self.is_modified = true;
+                        
+                        // Adjust cursor if needed
+                        if cursor.y >= self.lines.len() {
+                            cursor.y = self.lines.len().saturating_sub(1);
+                            cursor.x = self.line_length(cursor.y);
+                        }
+                        
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::JoinLines { y, column_pos } => {
+                    // To redo joining lines, we join them again
+                    if y < self.lines.len() && y + 1 < self.lines.len() {
+                        let next_line = self.lines.remove(y + 1);
+                        self.lines[y].push_str(&next_line);
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        
+                        // Update cursor position
+                        cursor.x = column_pos;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::ReplaceSelection { new_text, selection_start, selection_end, .. } => {
+                    // To redo a selection replacement, we:
+                    // 1. Delete the text in the selection area again
+                    // 2. Insert the new text
+                    
+                    let (start_line, start_col) = selection_start;
+                    let (end_line, end_col) = selection_end;
+                    
+                    // Set cursor to the beginning of the selection
+                    cursor.y = start_line;
+                    cursor.x = start_col;
+                    
+                    if self.delete_between(start_line, start_col, end_line, end_col) {
+                        // Now insert the new text
+                        self.insert_text_at_cursor(new_text, cursor);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::SetContent { new_lines, .. } => {
+                    // To redo setting content, we restore the new lines
+                    self.lines = new_lines;
+                    
+                    // Mark all lines as modified
+                    self.modified_lines.clear();
+                    for i in 0..self.lines.len() {
+                        self.modified_lines.insert(i);
+                    }
+                    
+                    self.is_modified = true;
+                    true
+                },
+            }
+        } else {
+            false
+        };
+        
+        // Update the cursor to the after-position
+        if result {
+            cursor.x = min(cursor.x, self.line_length(cursor.y));
+        }
+        
+        self.history.end_undo_or_redo();
+        result
+    }
+    
+    /// Helper function to delete text between two positions
+    fn delete_between(&mut self, start_line: usize, start_col: usize, end_line: usize, end_col: usize) -> bool {
+        if start_line >= self.lines.len() || end_line >= self.lines.len() {
+            return false;
+        }
+        
+        if start_line == end_line {
+            // Delete within a single line
+            let line = &mut self.lines[start_line];
+            if start_col <= line.len() && end_col <= line.len() && start_col <= end_col {
+                let before = &line[..start_col];
+                let after = &line[end_col..];
+                *line = format!("{}{}", before, after);
+                self.mark_line_modified(start_line);
+                return true;
+            }
+        } else if start_line < end_line {
+            // Delete across multiple lines
+            
+            // Get the beginning of the first line and the end of the last line
+            let first_line = &self.lines[start_line];
+            let last_line = &self.lines[end_line];
+            
+            if start_col <= first_line.len() && end_col <= last_line.len() {
+                let first_part = &first_line[..start_col];
+                let last_part = &last_line[end_col..];
+                
+                // Create the new merged line
+                let new_line = format!("{}{}", first_part, last_part);
+                
+                // Replace the first line with the merged content
+                self.lines[start_line] = new_line;
+                
+                // Remove all lines in between
+                self.lines.drain(start_line + 1..=end_line);
+                
+                // Mark the modified line
+                self.mark_line_modified(start_line);
+                
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// Helper function to insert text at the cursor position
+    fn insert_text_at_cursor(&mut self, text: String, cursor: &mut Cursor) {
+        if text.is_empty() {
+            return;
+        }
+        
+        // Split the text into lines
+        let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+        
+        // If there are no newlines, just insert the text at the cursor
+        if lines.is_empty() {
+            lines.push(text);
+        }
+        
+        if lines.len() == 1 {
+            // Simple case: insert a single line
+            if cursor.y < self.lines.len() {
+                let line = &mut self.lines[cursor.y];
+                if cursor.x <= line.len() {
+                    let before = line[..cursor.x].to_string();
+                    let after = line[cursor.x..].to_string();
+                    *line = format!("{}{}{}", before, lines[0], after);
+                    
+                    // Update cursor position
+                    cursor.x += lines[0].len();
+                    
+                    self.mark_line_modified(cursor.y);
+                }
+            }
+        } else {
+            // Multi-line insertion
+            if cursor.y < self.lines.len() {
+                // Make copy of current line to avoid borrow issues
+                let current_line = self.lines[cursor.y].clone();
+                
+                if cursor.x <= current_line.len() {
+                    // Split the current line
+                    let before = &current_line[..cursor.x];
+                    let after = &current_line[cursor.x..];
+                    
+                    // Update the first line with the beginning + first inserted line
+                    self.lines[cursor.y] = format!("{}{}", before, lines[0]);
+                    self.mark_line_modified(cursor.y);
+                    
+                    // Insert middle lines
+                    for (i, middle_line) in lines.iter().skip(1).take(lines.len() - 2).enumerate() {
+                        self.lines.insert(cursor.y + 1 + i, middle_line.clone());
+                        self.mark_line_modified(cursor.y + 1 + i);
+                    }
+                    
+                    // Insert the last line + end of original line
+                    if lines.len() >= 2 {
+                        let last_inserted = &lines[lines.len() - 1];
+                        self.lines.insert(cursor.y + lines.len() - 1, format!("{}{}", last_inserted, after));
+                        self.mark_line_modified(cursor.y + lines.len() - 1);
+                    }
+                    
+                    // Update cursor position
+                    cursor.y += lines.len() - 1;
+                    cursor.x = lines.last().unwrap().len();
+                }
+            }
+        }
     }
     
     /// Clear the current selection
@@ -187,6 +583,9 @@ impl Buffer {
             let (start_line, start_col) = start;
             let (end_line, end_col) = (cursor.y, cursor.x);
             
+            // Create the action before modifying the buffer
+            let cursor_before = *cursor;
+            
             // Ensure start is before end
             let (first_line, first_col, last_line, last_col) = if start_line < end_line || 
                 (start_line == end_line && start_col <= end_col) {
@@ -194,6 +593,9 @@ impl Buffer {
             } else {
                 (end_line, end_col, start_line, start_col)
             };
+            
+            // Get the selected text before modifying the buffer
+            let selected_text = self.get_selected_text(cursor, is_visual_line);
             
             // Handle visual line mode (delete entire lines)
             if is_visual_line {
@@ -234,6 +636,19 @@ impl Buffer {
                         cursor.y = min(first_line, self.lines.len().saturating_sub(1));
                         cursor.x = 0;
                         
+                        // Record the action in history
+                        let cursor_after = *cursor;
+                        self.history.push(EditorAction {
+                            action_type: ActionType::ReplaceSelection { 
+                                old_text: selected_text, 
+                                new_text: String::new(),
+                                selection_start: (first_line, first_col),
+                                selection_end: (last_line, last_col),
+                            },
+                            cursor_before,
+                            cursor_after,
+                        });
+                        
                         // Clear selection
                         self.selection_start = None;
                         return true;
@@ -264,6 +679,19 @@ impl Buffer {
                     // Move cursor to selection start
                     cursor.y = first_line;
                     cursor.x = start_col;
+                    
+                    // Record the action in history
+                    let cursor_after = *cursor;
+                    self.history.push(EditorAction {
+                        action_type: ActionType::ReplaceSelection { 
+                            old_text: selected_text, 
+                            new_text: String::new(),
+                            selection_start: (first_line, first_col),
+                            selection_end: (last_line, last_col),
+                        },
+                        cursor_before,
+                        cursor_after,
+                    });
                     
                     // Clear selection
                     self.selection_start = None;
@@ -311,6 +739,19 @@ impl Buffer {
                 // Move cursor to selection start
                 cursor.y = first_line;
                 cursor.x = first_col;
+                
+                // Record the action in history
+                let cursor_after = *cursor;
+                self.history.push(EditorAction {
+                    action_type: ActionType::ReplaceSelection { 
+                        old_text: selected_text, 
+                        new_text: String::new(),
+                        selection_start: (first_line, first_col),
+                        selection_end: (last_line, last_col),
+                    },
+                    cursor_before,
+                    cursor_after,
+                });
                 
                 // Clear selection
                 self.selection_start = None;
@@ -372,6 +813,10 @@ impl Buffer {
     }
 
     pub fn insert_char_at_cursor(&mut self, c: char, cursor: &Cursor) {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = Cursor { x: cursor.x + 1, y: cursor.y };
+        
         if cursor.y >= self.lines.len() {
             // Add empty lines if cursor is beyond current lines
             while cursor.y >= self.lines.len() {
@@ -403,22 +848,56 @@ impl Buffer {
         // Mark line as modified
         self.modified_lines.insert(cursor.y);
         self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::InsertChar { x: cursor.x, y: cursor.y, c },
+            cursor_before,
+            cursor_after,
+        });
     }
 
     pub fn delete_char_at_cursor(&mut self, cursor: &Cursor) {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = *cursor; // Cursor doesn't move after delete
+        
         if cursor.y < self.lines.len() {
             let line = &mut self.lines[cursor.y];
             if cursor.x < line.len() {
+                // Store the character being deleted
+                let c = line.chars().nth(cursor.x).unwrap();
+                
                 line.remove(cursor.x);
                 // Mark line as modified
                 self.modified_lines.insert(cursor.y);
                 self.is_modified = true;
+                
+                // Record the action in history
+                self.history.push(EditorAction {
+                    action_type: ActionType::DeleteChar { x: cursor.x, y: cursor.y, c },
+                    cursor_before,
+                    cursor_after,
+                });
             }
         }
     }
     
     pub fn delete_line(&mut self, line_idx: usize) {
         if line_idx < self.lines.len() {
+            // Save line content before deleting
+            let content = self.lines[line_idx].clone();
+            
+            // Create the action before modifying the buffer
+            let cursor_before = Cursor { x: 0, y: line_idx };
+            let cursor_after = if line_idx + 1 < self.lines.len() {
+                Cursor { x: 0, y: line_idx }
+            } else if line_idx > 0 {
+                Cursor { x: self.lines[line_idx - 1].len(), y: line_idx - 1 }
+            } else {
+                Cursor { x: 0, y: 0 }
+            };
+            
             // Remove the line
             self.lines.remove(line_idx);
             
@@ -443,12 +922,26 @@ impl Buffer {
                 // The deleted line itself is removed from tracking
             }
             self.modified_lines = new_modified_lines;
+            
+            // Record the action in history
+            self.history.push(EditorAction {
+                action_type: ActionType::DeleteLine { y: line_idx, content },
+                cursor_before,
+                cursor_after,
+            });
         }
     }
     
     pub fn join_line(&mut self, line_idx: usize) {
         // Join current line with the next line
         if line_idx < self.lines.len() - 1 {
+            // Save info for the history
+            let column_pos = self.lines[line_idx].len();
+            
+            // Create the action before modifying the buffer
+            let cursor_before = Cursor { x: column_pos, y: line_idx };
+            let cursor_after = Cursor { x: column_pos, y: line_idx };
+            
             // Get the content of the next line
             let next_line_content = self.lines[line_idx + 1].clone();
             
@@ -475,10 +968,21 @@ impl Buffer {
                 // The deleted line itself is removed from tracking
             }
             self.modified_lines = new_modified_lines;
+            
+            // Record the action in history
+            self.history.push(EditorAction {
+                action_type: ActionType::JoinLines { y: line_idx, column_pos },
+                cursor_before,
+                cursor_after,
+            });
         }
     }
 
     pub fn insert_newline_at_cursor(&mut self, cursor: &Cursor) {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = Cursor { x: 0, y: cursor.y + 1 };
+        
         if cursor.y >= self.lines.len() {
             // Add empty lines if cursor is beyond current lines
             while cursor.y >= self.lines.len() {
@@ -494,6 +998,9 @@ impl Buffer {
             line[cursor.x..].to_string()
         };
 
+        // Save the remaining text for history
+        let remaining_text = new_line.clone();
+        
         if cursor.x < line.len() {
             line.truncate(cursor.x);
         }
@@ -504,6 +1011,13 @@ impl Buffer {
         self.modified_lines.insert(cursor.y);
         self.modified_lines.insert(cursor.y + 1);
         self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::InsertNewline { x: cursor.x, y: cursor.y, remaining_text },
+            cursor_before,
+            cursor_after,
+        });
     }
 
     pub fn get_line(&self, y: usize) -> &str {
@@ -556,6 +1070,10 @@ impl Buffer {
     
     /// Set the entire content of the buffer from a string
     pub fn set_content(&mut self, content: &str) -> Result<()> {
+        // Save original content for history
+        let old_lines = self.lines.clone();
+        let cursor_before = Cursor { x: 0, y: 0 };
+        
         // Start fresh with no lines
         self.lines = Vec::new();
         
@@ -581,6 +1099,24 @@ impl Buffer {
                 self.lines.push(content[start..].to_string());
             }
         }
+        
+        // Mark all lines as modified
+        self.modified_lines.clear();
+        for i in 0..self.lines.len() {
+            self.modified_lines.insert(i);
+        }
+        self.is_modified = true;
+        
+        // Record the action in history
+        let cursor_after = Cursor { x: 0, y: 0 };
+        self.history.push(EditorAction {
+            action_type: ActionType::SetContent { 
+                old_lines,
+                new_lines: self.lines.clone(),
+            },
+            cursor_before,
+            cursor_after,
+        });
         
         Ok(())
     }
@@ -619,6 +1155,12 @@ impl Buffer {
     /// Check if line is modified
     pub fn is_line_modified(&self, line_idx: usize) -> bool {
         self.modified_lines.contains(&line_idx)
+    }
+    
+    /// Mark a line as modified
+    pub fn mark_line_modified(&mut self, line_idx: usize) {
+        self.modified_lines.insert(line_idx);
+        self.is_modified = true;
     }
     
     /// Get all modified line indices

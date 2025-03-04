@@ -1911,6 +1911,8 @@ fn render_help_page<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect) {
     text.push(Line::from("x        - Delete character at cursor and enter insert mode"));
     text.push(Line::from("y        - Yank (copy) selection or line"));
     text.push(Line::from("p        - Paste clipboard content"));
+    text.push(Line::from("u        - Undo last action"));
+    text.push(Line::from("Ctrl+r   - Redo previously undone action"));
     text.push(Line::from("Backspace - Delete character or join with previous line"));
     text.push(Line::from(""));
     

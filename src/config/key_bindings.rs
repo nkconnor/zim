@@ -98,6 +98,8 @@ impl Default for KeyBindings {
         normal_mode.insert("move_down".to_string(), KeyBinding::new("j"));
         normal_mode.insert("move_up".to_string(), KeyBinding::new("k"));
         normal_mode.insert("move_right".to_string(), KeyBinding::new("l"));
+        normal_mode.insert("undo".to_string(), KeyBinding::new("u"));
+        normal_mode.insert("redo".to_string(), KeyBinding::new("r").with_modifier("ctrl"));
         normal_mode.insert(
             "find_file".to_string(),
             KeyBinding::new("o").with_modifier("ctrl"),

@@ -6,6 +6,7 @@ mod viewport;
 mod diagnostics;
 mod syntax;
 mod snake;
+mod history;
 
 pub use buffer::Buffer;
 pub use cursor::Cursor;
@@ -64,6 +65,10 @@ pub enum EditorCommand {
     // Rust integration
     RunCargoCheck,
     RunCargoClippy,
+    
+    // Editing operations
+    Undo,
+    Redo,
     
     // No operation
     Noop,
@@ -1828,6 +1833,22 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             // Help (Ctrl+h)
             KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.mode = Mode::Help;
+            },
+            // Undo (u)
+            KeyCode::Char('u') => {
+                let tab = self.current_tab_mut();
+                if tab.buffer.undo(&mut tab.cursor) {
+                    self.update_viewport();
+                    self.invalidate_highlight_cache();
+                }
+            },
+            // Redo (Ctrl+r)
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let tab = self.current_tab_mut();
+                if tab.buffer.redo(&mut tab.cursor) {
+                    self.update_viewport();
+                    self.invalidate_highlight_cache();
+                }
             },
             // Ctrl+n for new tab
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -1,5 +1,7 @@
 # Zim Editor Information
 
+
+
 ## ⚠️ CRITICAL WARNINGS ⚠️
 
 ### !!! NEVER USE `cargo run` UNDER ANY CIRCUMSTANCES !!!
