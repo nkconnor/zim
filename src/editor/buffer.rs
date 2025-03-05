@@ -159,6 +159,30 @@ impl Buffer {
                     self.is_modified = true;
                     true
                 },
+                ActionType::OpenLineBelow { y } => {
+                    // To undo opening a line below, remove the line
+                    if y + 1 < self.lines.len() {
+                        self.lines.remove(y + 1);
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::OpenLineAbove { y } => {
+                    // To undo opening a line above, remove the line
+                    if y < self.lines.len() {
+                        self.lines.remove(y);
+                        if y < self.lines.len() {
+                            self.mark_line_modified(y);
+                        }
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
             }
         } else {
             false
@@ -303,6 +327,36 @@ impl Buffer {
                     
                     self.is_modified = true;
                     true
+                },
+                ActionType::OpenLineBelow { y } => {
+                    // To redo opening a line below, insert an empty line
+                    if y < self.lines.len() {
+                        self.lines.insert(y + 1, String::new());
+                        self.mark_line_modified(y + 1);
+                        self.is_modified = true;
+                        
+                        // Update cursor position
+                        cursor.y = y + 1;
+                        cursor.x = 0;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::OpenLineAbove { y } => {
+                    // To redo opening a line above, insert an empty line
+                    if y <= self.lines.len() {
+                        self.lines.insert(y, String::new());
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        
+                        // Update cursor position
+                        cursor.y = y;
+                        cursor.x = 0;
+                        true
+                    } else {
+                        false
+                    }
                 },
             }
         } else {
@@ -1020,6 +1074,59 @@ impl Buffer {
         });
     }
 
+    /// Open a new line below the current line and return the line number
+    pub fn open_line_below(&mut self, line_idx: usize) -> usize {
+        // Create the action before modifying the buffer
+        let cursor_before = Cursor { x: 0, y: line_idx };
+        let cursor_after = Cursor { x: 0, y: line_idx + 1 };
+        
+        if line_idx >= self.lines.len() {
+            // Add a new line at the end
+            self.lines.push(String::new());
+        } else {
+            // Insert a new line after the current line
+            self.lines.insert(line_idx + 1, String::new());
+        }
+        
+        // Mark the new line as modified
+        self.modified_lines.insert(line_idx + 1);
+        self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::OpenLineBelow { y: line_idx },
+            cursor_before,
+            cursor_after,
+        });
+        
+        // Return the index of the new line
+        line_idx + 1
+    }
+    
+    /// Open a new line above the current line and return the line number
+    pub fn open_line_above(&mut self, line_idx: usize) -> usize {
+        // Create the action before modifying the buffer
+        let cursor_before = Cursor { x: 0, y: line_idx };
+        let cursor_after = Cursor { x: 0, y: line_idx };
+        
+        // Insert a new line before the current line
+        self.lines.insert(line_idx, String::new());
+        
+        // Mark the new line as modified
+        self.modified_lines.insert(line_idx);
+        self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::OpenLineAbove { y: line_idx },
+            cursor_before,
+            cursor_after,
+        });
+        
+        // Return the index of the new line
+        line_idx
+    }
+
     pub fn get_line(&self, y: usize) -> &str {
         if y < self.lines.len() {
             &self.lines[y]
@@ -1267,5 +1374,85 @@ mod tests {
         assert_eq!(buffer.lines[0], "First line");
         assert_eq!(buffer.lines[1], "Second line");
         assert_eq!(buffer.lines[2], "Third line");
+    }
+    
+    #[test]
+    fn test_open_line_below() {
+        let mut buffer = Buffer::new();
+        buffer.lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+        ];
+        
+        // Open a line below index 0 (after "First line")
+        let new_line_idx = buffer.open_line_below(0);
+        
+        // Verify the new line is inserted
+        assert_eq!(new_line_idx, 1);
+        assert_eq!(buffer.lines.len(), 3);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "");
+        assert_eq!(buffer.lines[2], "Second line");
+        
+        // Verify the line is marked as modified
+        assert!(buffer.is_line_modified(1));
+        
+        // Test undo/redo
+        let mut cursor = Cursor { x: 0, y: 0 };
+        assert!(buffer.undo(&mut cursor));
+        
+        // Verify the line was removed during undo
+        assert_eq!(buffer.lines.len(), 2);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "Second line");
+        
+        // Redo the operation
+        assert!(buffer.redo(&mut cursor));
+        
+        // Verify the line was added back during redo
+        assert_eq!(buffer.lines.len(), 3);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "");
+        assert_eq!(buffer.lines[2], "Second line");
+    }
+    
+    #[test]
+    fn test_open_line_above() {
+        let mut buffer = Buffer::new();
+        buffer.lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+        ];
+        
+        // Open a line above index 1 (before "Second line")
+        let new_line_idx = buffer.open_line_above(1);
+        
+        // Verify the new line is inserted
+        assert_eq!(new_line_idx, 1);
+        assert_eq!(buffer.lines.len(), 3);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "");
+        assert_eq!(buffer.lines[2], "Second line");
+        
+        // Verify the line is marked as modified
+        assert!(buffer.is_line_modified(1));
+        
+        // Test undo/redo
+        let mut cursor = Cursor { x: 0, y: 0 };
+        assert!(buffer.undo(&mut cursor));
+        
+        // Verify the line was removed during undo
+        assert_eq!(buffer.lines.len(), 2);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "Second line");
+        
+        // Redo the operation
+        assert!(buffer.redo(&mut cursor));
+        
+        // Verify the line was added back during redo
+        assert_eq!(buffer.lines.len(), 3);
+        assert_eq!(buffer.lines[0], "First line");
+        assert_eq!(buffer.lines[1], "");
+        assert_eq!(buffer.lines[2], "Second line");
     }
 }

@@ -36,6 +36,12 @@ pub enum ActionType {
         old_lines: Vec<String>,
         new_lines: Vec<String>,
     },
+    OpenLineBelow {
+        y: usize,
+    },
+    OpenLineAbove {
+        y: usize,
+    },
 }
 
 #[derive(Debug, Clone)]

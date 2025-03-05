@@ -73,6 +73,14 @@ zim [file]        # Open a file or start with the file finder
 - `Ctrl+b` - Page up
 - `Ctrl+f` - Page down
 
+### Editing
+- `d` - Delete current line
+- `x` - Delete character and enter insert mode
+- `o` - Open new line below cursor and enter insert mode
+- `O` - Open new line above cursor and enter insert mode
+- `u` - Undo last action
+- `Ctrl+r` - Redo previously undone action
+
 ### Tab Management
 - `Ctrl+n` - New tab
 - `Ctrl+w` - Close current tab
@@ -151,6 +159,8 @@ page_down = { key = "f", modifiers = ["ctrl"] }  # Page down
 # Editing operations
 delete_line = { key = "d" }                  # Delete current line
 delete_char = { key = "x" }                  # Delete character and enter insert mode
+open_line_below = { key = "o" }              # Open new line below cursor and enter insert mode
+open_line_above = { key = "O" }              # Open new line above cursor and enter insert mode
 undo = { key = "u" }                         # Undo last action
 redo = { key = "r", modifiers = ["ctrl"] }   # Redo previously undone action
 

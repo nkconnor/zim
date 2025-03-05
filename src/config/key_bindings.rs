@@ -94,6 +94,8 @@ impl Default for KeyBindings {
         normal_mode.insert("delete_line".to_string(), KeyBinding::new("d"));
         normal_mode.insert("delete_char".to_string(), KeyBinding::new("x"));
         normal_mode.insert("snake_game".to_string(), KeyBinding::new("s"));
+        normal_mode.insert("open_line_below".to_string(), KeyBinding::new("o"));
+        normal_mode.insert("open_line_above".to_string(), KeyBinding::new("O"));
         normal_mode.insert("move_left".to_string(), KeyBinding::new("h"));
         normal_mode.insert("move_down".to_string(), KeyBinding::new("j"));
         normal_mode.insert("move_up".to_string(), KeyBinding::new("k"));

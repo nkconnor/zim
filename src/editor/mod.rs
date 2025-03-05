@@ -1533,6 +1533,38 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             self.invalidate_highlight_cache();
                         }
                     },
+                    "open_line_below" => {
+                        let cursor_y = self.current_tab().cursor.y;
+                        let new_line_idx = self.current_tab_mut().buffer.open_line_below(cursor_y);
+                        
+                        // Move cursor to the new line
+                        let tab = self.current_tab_mut();
+                        tab.cursor.y = new_line_idx;
+                        tab.cursor.x = 0;
+                        
+                        // Switch to insert mode
+                        self.mode = Mode::Insert;
+                        
+                        // Update viewport and invalidate highlighting
+                        self.update_viewport();
+                        self.invalidate_highlight_cache();
+                    },
+                    "open_line_above" => {
+                        let cursor_y = self.current_tab().cursor.y;
+                        let new_line_idx = self.current_tab_mut().buffer.open_line_above(cursor_y);
+                        
+                        // Move cursor to the new line
+                        let tab = self.current_tab_mut();
+                        tab.cursor.y = new_line_idx;
+                        tab.cursor.x = 0;
+                        
+                        // Switch to insert mode
+                        self.mode = Mode::Insert;
+                        
+                        // Update viewport and invalidate highlighting
+                        self.update_viewport();
+                        self.invalidate_highlight_cache();
+                    },
                     _ => {}
                 }
                 return Ok(true);
@@ -1600,6 +1632,34 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 if tab.cursor.x > line_len {
                     tab.cursor.x = line_len.saturating_sub(1).max(0);
                 }
+                
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+            },
+            // o to open line below current line
+            KeyCode::Char('o') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let cursor_y = self.current_tab().cursor.y;
+                let new_line_idx = self.current_tab_mut().buffer.open_line_below(cursor_y);
+                
+                // Move cursor to the new line and switch to insert mode
+                let tab = self.current_tab_mut();
+                tab.cursor.y = new_line_idx;
+                tab.cursor.x = 0;
+                self.mode = Mode::Insert;
+                
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+            },
+            // O to open line above current line
+            KeyCode::Char('O') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
+                let cursor_y = self.current_tab().cursor.y;
+                let new_line_idx = self.current_tab_mut().buffer.open_line_above(cursor_y);
+                
+                // Move cursor to the new line and switch to insert mode
+                let tab = self.current_tab_mut();
+                tab.cursor.y = new_line_idx;
+                tab.cursor.x = 0;
+                self.mode = Mode::Insert;
                 
                 self.update_viewport();
                 self.invalidate_highlight_cache();
