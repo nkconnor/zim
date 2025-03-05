@@ -334,9 +334,12 @@ fn render_editor_area_inner<B: Backend>(
     // This allows for proper scrolling calculations while avoiding jiggling
     let mut viewport = tab.viewport.clone();
     
-    // Reserve space for line numbers (at least 4 chars for thousands of lines)
-    let line_number_width = 5; // 4 digits + 1 space
-    let content_width = inner_area.width.saturating_sub(line_number_width);
+    // Calculate needed space for line numbers based on total line count
+    // Add 2 to account for 1 space and 1 character for diagnostic indicator
+    let total_lines = tab.buffer.line_count();
+    let line_num_width = total_lines.to_string().len();
+    let line_number_width = line_num_width + 2; // width + diagnostic indicator + space
+    let content_width = inner_area.width.saturating_sub(line_number_width as u16);
     
     viewport.update_dimensions(content_width as usize, inner_area.height as usize);
     
@@ -683,9 +686,12 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
     // Update viewport dimensions for proper rendering
     let mut viewport = tab.viewport.clone();
     
-    // Reserve space for line numbers (at least 4 chars for thousands of lines)
-    let line_number_width = 5; // 4 digits + 1 space
-    let content_width = inner_area.width.saturating_sub(line_number_width);
+    // Calculate needed space for line numbers based on total line count
+    // Add 2 to account for 1 space and 1 character for diagnostic indicator
+    let total_lines = tab.buffer.line_count();
+    let line_num_width = total_lines.to_string().len();
+    let line_number_width = line_num_width + 2; // width + diagnostic indicator + space
+    let content_width = inner_area.width.saturating_sub(line_number_width as u16);
     
     viewport.update_dimensions(content_width as usize, inner_area.height as usize);
     
@@ -710,8 +716,28 @@ fn render_editor_area_with_selection<B: Backend>(f: &mut Frame<B>, editor: &mut 
             let number_style = Style::default().fg(Color::DarkGray);
             let number_str = format!("{:>width$} ", line_number, width=line_num_width);
             
-            // Create line with number followed by content
+            // Check if this line has diagnostics and add a gutter indicator
+            let current_line = start_line + idx;
+            let has_diagnostics = tab.diagnostics.get_diagnostics_for_line(current_line).is_some();
+            let (indicator, indicator_style) = if has_diagnostics {
+                let diagnostics = tab.diagnostics.get_diagnostics_for_line(current_line).unwrap();
+                let has_error = diagnostics.iter().any(|d| d.severity == crate::editor::DiagnosticSeverity::Error);
+                let has_warning = diagnostics.iter().any(|d| d.severity == crate::editor::DiagnosticSeverity::Warning);
+                
+                if has_error {
+                    ("●", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                } else if has_warning {
+                    ("●", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                } else {
+                    ("●", Style::default().fg(Color::Blue))
+                }
+            } else {
+                (" ", Style::default())
+            };
+            
+            // Create line with gutter indicator, number, and content
             let mut spans = vec![
+                tui::text::Span::styled(indicator, indicator_style),
                 tui::text::Span::styled(number_str, number_style)
             ];
             
