@@ -46,12 +46,21 @@ fn run_app(
         }
 
         if crossterm::event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                // Handle key event in the editor
-                if !editor.handle_key(key)? {
-                    // Editor returned false, which means we should quit
-                    return Ok(());
-                }
+            match event::read()? {
+                Event::Key(key) => {
+                    // Handle key event in the editor
+                    if !editor.handle_key(key)? {
+                        // Editor returned false, which means we should quit
+                        return Ok(());
+                    }
+                },
+                Event::Mouse(mouse_event) => {
+                    // Handle mouse event in the editor if we have tabs
+                    if !editor.tabs.is_empty() {
+                        editor.handle_mouse(mouse_event)?;
+                    }
+                },
+                _ => {}
             }
         }
     }

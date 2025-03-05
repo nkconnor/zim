@@ -50,3 +50,8 @@ cargo test
   - Uses tui-rs for terminal UI
 
 - `src/main.rs`: Application entry point and event loop
+
+## Input Methods
+
+- Vim-like keyboard navigation and commands
+- Mouse wheel scrolling for faster document navigation

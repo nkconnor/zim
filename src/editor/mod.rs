@@ -18,7 +18,7 @@ pub use syntax::{SyntaxHighlighter, HighlightedLine};
 pub use snake::{Snake, Direction, GameState, Position};
 
 use anyhow::Result;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use crate::config::Config;
 use std::collections::{HashSet, HashMap};
 
@@ -804,6 +804,34 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
             },
             // Delete mode with composable delete operations
             Mode::Delete => self.handle_delete_mode(key),
+        }
+    }
+    
+    /// Handle mouse events in the editor
+    ///
+    /// This function handles mouse events, particularly scroll events,
+    /// to allow users to scroll the editor with the mouse wheel.
+    pub fn handle_mouse(&mut self, mouse_event: MouseEvent) -> Result<bool> {
+        // Check if we have any tabs and the current tab index is valid
+        if self.tabs.is_empty() || self.current_tab >= self.tabs.len() {
+            return Ok(true); // Do nothing if no valid tabs
+        }
+        
+        match mouse_event.kind {
+            MouseEventKind::ScrollDown => {
+                // Scroll the viewport down 3 lines
+                let tab = self.current_tab_mut();
+                let max_line = tab.buffer.lines.len();
+                tab.viewport.scroll_down(3, max_line);
+                Ok(true)
+            },
+            MouseEventKind::ScrollUp => {
+                // Scroll the viewport up 3 lines
+                let tab = self.current_tab_mut();
+                tab.viewport.scroll_up(3);
+                Ok(true)
+            },
+            _ => Ok(true), // Ignore other mouse events for now
         }
     }
     
@@ -2868,5 +2896,72 @@ mod tests {
         
         // Verify we're back in normal mode
         assert_eq!(editor.mode, Mode::Normal);
+    }
+    
+    #[test]
+    fn test_mouse_scroll_handling() {
+        use crossterm::event::{MouseEvent, MouseEventKind};
+        
+        // Create editor with some content
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Setup buffer with multiple lines
+        editor.current_tab_mut().buffer.lines = vec![
+            "Line 1".to_string(),
+            "Line 2".to_string(),
+            "Line 3".to_string(),
+            "Line 4".to_string(),
+            "Line 5".to_string(),
+            "Line 6".to_string(),
+            "Line 7".to_string(),
+            "Line 8".to_string(),
+            "Line 9".to_string(),
+            "Line 10".to_string(),
+            "Line 11".to_string(),
+            "Line 12".to_string(),
+            "Line 13".to_string(),
+            "Line 14".to_string(),
+            "Line 15".to_string(),
+        ];
+        
+        // Initial viewport should be at top
+        assert_eq!(editor.current_tab().viewport.top_line, 0);
+        
+        // Create a scroll down mouse event (no column/row values needed for test)
+        let scroll_down = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        
+        // Handle the mouse scroll down event
+        let _ = editor.handle_mouse(scroll_down);
+        
+        // Verify viewport scrolled down by 3 lines
+        assert_eq!(editor.current_tab().viewport.top_line, 3);
+        
+        // Create a scroll up mouse event
+        let scroll_up = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 0,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        
+        // Handle the mouse scroll up event
+        let _ = editor.handle_mouse(scroll_up);
+        
+        // Verify viewport scrolled up by 3 lines
+        assert_eq!(editor.current_tab().viewport.top_line, 0);
+        
+        // Test with empty tab list
+        let mut empty_editor = Editor::new_with_config(Config::default());
+        empty_editor.tabs.clear();
+        
+        // Should not panic with empty tab list
+        let result = empty_editor.handle_mouse(scroll_down);
+        assert!(result.is_ok());
     }
 }
