@@ -25,6 +25,8 @@ pub enum Mode {
     Visual,
     /// Visual Line mode (for line-based selections)
     VisualLine,
+    /// Delete mode (for composable delete operations)
+    Delete,
     /// Snake game mode (easter egg)
     Snake,
 }

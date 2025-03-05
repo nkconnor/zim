@@ -183,6 +183,57 @@ impl Buffer {
                         false
                     }
                 },
+                ActionType::DeleteWord { position, deleted_text } => {
+                    // To undo word deletion, we insert the word back
+                    let (y, x) = position;
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x <= line.len() {
+                            // Insert the deleted text back at the position
+                            let before = &line[..x];
+                            let after = &line[x..];
+                            *line = format!("{}{}{}", before, deleted_text, after);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteToEndOfLine { position, deleted_text } => {
+                    // To undo end-of-line deletion, we append the deleted text back
+                    let (y, x) = position;
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        if x <= line.len() {
+                            line.push_str(&deleted_text);
+                            self.mark_line_modified(y);
+                            self.is_modified = true;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteToStartOfLine { position, deleted_text } => {
+                    // To undo start-of-line deletion, we prepend the deleted text back
+                    let (y, _) = position;
+                    if y < self.lines.len() {
+                        let line = &mut self.lines[y];
+                        // Create a new line with the prepended text
+                        *line = format!("{}{}", deleted_text, line);
+                        self.mark_line_modified(y);
+                        self.is_modified = true;
+                        true
+                    } else {
+                        false
+                    }
+                },
             }
         } else {
             false
@@ -354,6 +405,79 @@ impl Buffer {
                         cursor.y = y;
                         cursor.x = 0;
                         true
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteWord { position, deleted_text } => {
+                    // To redo word deletion, remove the text again
+                    let (line_idx, col_idx) = position;
+                    if line_idx < self.lines.len() {
+                        let line = &mut self.lines[line_idx];
+                        if col_idx + deleted_text.len() <= line.len() {
+                            // Check if the word is still there
+                            let word_to_delete = &line[col_idx..col_idx + deleted_text.len()];
+                            if word_to_delete == deleted_text {
+                                // Remove it
+                                let new_line = format!("{}{}", &line[..col_idx], &line[col_idx + deleted_text.len()..]);
+                                *line = new_line;
+                                self.mark_line_modified(line_idx);
+                                self.is_modified = true;
+                                
+                                // Update cursor position
+                                cursor.y = line_idx;
+                                cursor.x = col_idx;
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteToEndOfLine { position, deleted_text: _ } => {
+                    // To redo end-of-line deletion, truncate the line again
+                    let (line_idx, col_idx) = position;
+                    if line_idx < self.lines.len() {
+                        let line = &mut self.lines[line_idx];
+                        if col_idx <= line.len() {
+                            // Truncate the line at column position
+                            line.truncate(col_idx);
+                            self.mark_line_modified(line_idx);
+                            self.is_modified = true;
+                            
+                            // Update cursor position
+                            cursor.y = line_idx;
+                            cursor.x = col_idx;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                },
+                ActionType::DeleteToStartOfLine { position, deleted_text: _ } => {
+                    // To redo start-of-line deletion, remove from start of line again
+                    let (line_idx, col_idx) = position;
+                    if line_idx < self.lines.len() {
+                        let line = &mut self.lines[line_idx];
+                        if col_idx <= line.len() {
+                            // Remove characters from start of line
+                            *line = line[col_idx.min(line.len())..].to_string();
+                            self.mark_line_modified(line_idx);
+                            self.is_modified = true;
+                            
+                            // Update cursor position
+                            cursor.y = line_idx;
+                            cursor.x = 0;
+                            true
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     }
@@ -1273,6 +1397,152 @@ impl Buffer {
     /// Get all modified line indices
     pub fn get_modified_lines(&self) -> &HashSet<usize> {
         &self.modified_lines
+    }
+    
+    /// Delete word at cursor position
+    /// Returns true if deletion was successful
+    pub fn delete_word_at_cursor(&mut self, cursor: &mut Cursor) -> bool {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = *cursor; // Cursor doesn't move after delete word
+
+        if cursor.y >= self.lines.len() {
+            return false;
+        }
+        
+        let line = &self.lines[cursor.y];
+        if cursor.x >= line.len() {
+            return false;
+        }
+        
+        // Find the end of the current word
+        let mut end_idx = cursor.x;
+        let chars: Vec<char> = line.chars().collect();
+        
+        // If we're at a whitespace, delete all contiguous whitespace
+        if chars[end_idx].is_whitespace() {
+            while end_idx < chars.len() && chars[end_idx].is_whitespace() {
+                end_idx += 1;
+            }
+        } 
+        // If we're at a word character, delete until the next non-word char
+        else if chars[end_idx].is_alphanumeric() || chars[end_idx] == '_' {
+            while end_idx < chars.len() && (chars[end_idx].is_alphanumeric() || chars[end_idx] == '_') {
+                end_idx += 1;
+            }
+        } 
+        // If we're at a symbol, delete all contiguous symbols
+        else {
+            while end_idx < chars.len() && !(chars[end_idx].is_alphanumeric() || chars[end_idx] == '_' || chars[end_idx].is_whitespace()) {
+                end_idx += 1;
+            }
+        }
+        
+        // Nothing to delete
+        if end_idx == cursor.x {
+            return false;
+        }
+        
+        // Extract the text to be deleted
+        let deleted_text = line[cursor.x..end_idx].to_string();
+        
+        // Delete the word
+        let new_line = format!("{}{}", &line[0..cursor.x], &line[end_idx..]);
+        self.lines[cursor.y] = new_line;
+        
+        // Mark line as modified
+        self.mark_line_modified(cursor.y);
+        self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::DeleteWord { 
+                position: (cursor.y, cursor.x),
+                deleted_text,
+            },
+            cursor_before,
+            cursor_after,
+        });
+        
+        true
+    }
+    
+    /// Delete from cursor to end of line
+    /// Returns true if deletion was successful
+    pub fn delete_to_end_of_line(&mut self, cursor: &Cursor) -> bool {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = *cursor; // Cursor doesn't move 
+        
+        if cursor.y >= self.lines.len() {
+            return false;
+        }
+        
+        let line = &self.lines[cursor.y];
+        if cursor.x >= line.len() {
+            return false; // Already at end of line
+        }
+        
+        // Extract the text to be deleted
+        let deleted_text = line[cursor.x..].to_string();
+        
+        // Delete to end of line
+        self.lines[cursor.y].truncate(cursor.x);
+        
+        // Mark line as modified
+        self.mark_line_modified(cursor.y);
+        self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::DeleteToEndOfLine { 
+                position: (cursor.y, cursor.x),
+                deleted_text,
+            },
+            cursor_before,
+            cursor_after,
+        });
+        
+        true
+    }
+    
+    /// Delete from start of line to cursor
+    /// Returns true if deletion was successful
+    pub fn delete_to_beginning_of_line(&mut self, cursor: &Cursor) -> bool {
+        // Create the action before modifying the buffer
+        let cursor_before = *cursor;
+        let cursor_after = Cursor { x: 0, y: cursor.y }; // Cursor moves to start of line
+        
+        if cursor.y >= self.lines.len() {
+            return false;
+        }
+        
+        let line = &self.lines[cursor.y];
+        if cursor.x == 0 {
+            return false; // Already at start of line
+        }
+        
+        // Extract the text to be deleted
+        let deleted_text = line[0..cursor.x].to_string();
+        
+        // Delete from start of line to cursor
+        self.lines[cursor.y] = line[cursor.x..].to_string();
+        
+        // Mark line as modified
+        self.mark_line_modified(cursor.y);
+        self.is_modified = true;
+        
+        // Record the action in history
+        self.history.push(EditorAction {
+            action_type: ActionType::DeleteToStartOfLine { 
+                position: (cursor.y, cursor.x),
+                deleted_text,
+            },
+            cursor_before,
+            cursor_after,
+        });
+        
+        true
     }
     
     // We use the similar crate for diffing, so we no longer need the load_file_for_diff method

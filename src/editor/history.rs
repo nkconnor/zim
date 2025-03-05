@@ -42,6 +42,19 @@ pub enum ActionType {
     OpenLineAbove {
         y: usize,
     },
+    // New delete operations for DeleteMode
+    DeleteWord {
+        position: (usize, usize),  // (line, column)
+        deleted_text: String,
+    },
+    DeleteToEndOfLine {
+        position: (usize, usize),  // (line, column)
+        deleted_text: String,
+    },
+    DeleteToStartOfLine {
+        position: (usize, usize),  // (line, column)
+        deleted_text: String,
+    },
 }
 
 #[derive(Debug, Clone)]

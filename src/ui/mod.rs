@@ -2032,6 +2032,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::DiagnosticsPanel => "DIAGNOSTICS".to_string(),
         Mode::Visual => "VISUAL".to_string(),
         Mode::VisualLine => "VISUAL LINE".to_string(),
+        Mode::Delete => "DELETE".to_string(),
         Mode::Snake => {
             if let Some(snake) = &editor.snake_game {
                 match snake.state() {
@@ -2050,6 +2051,7 @@ fn render_status_line<B: Backend>(f: &mut Frame<B>, editor: &Editor, area: Rect)
         Mode::TokenSearch => format!("{} | Press Enter to go to selection, Esc to cancel", mode_text),
         Mode::FilenamePrompt => format!("{} | Press Enter to save, Esc to cancel", mode_text),
         Mode::DiagnosticsPanel => format!("{} | Press Enter to go to selected error, n/p for next/prev, Esc to exit", mode_text),
+        Mode::Delete => format!("{} | d: delete line, w: delete word, $: delete to end, ^/0: delete to start, Esc: cancel", mode_text),
         Mode::Snake => format!("{} | Use h,j,k,l or arrow keys to move | r: restart | q/ESC: exit", mode_text),
         Mode::WriteConfirm => {
             // Get current file info for write confirmation

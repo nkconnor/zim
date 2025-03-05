@@ -91,7 +91,7 @@ impl Default for KeyBindings {
         normal_mode.insert("save_file".to_string(), KeyBinding::new("w"));
         normal_mode.insert("reload_file".to_string(), KeyBinding::new("e"));
         normal_mode.insert("save_and_quit".to_string(), KeyBinding::new("X"));
-        normal_mode.insert("delete_line".to_string(), KeyBinding::new("d"));
+        // We'll handle 'd' directly in normal mode for delete operations
         normal_mode.insert("delete_char".to_string(), KeyBinding::new("x"));
         normal_mode.insert("snake_game".to_string(), KeyBinding::new("s"));
         normal_mode.insert("open_line_below".to_string(), KeyBinding::new("o"));

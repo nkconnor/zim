@@ -802,10 +802,77 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                     _ => self.handle_normal_mode(key),
                 }
             },
+            // Delete mode with composable delete operations
+            Mode::Delete => self.handle_delete_mode(key),
         }
     }
     
-    /// Handle key events in snake game mode
+    /// Handle key events in delete mode
+    fn handle_delete_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel delete operation
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
+            KeyCode::Char('d') => {
+                // Delete current line (dd)
+                let cursor_y = self.current_tab().cursor.y;
+                self.current_tab_mut().buffer.delete_line(cursor_y);
+                
+                // Adjust cursor if needed
+                let tab = self.current_tab_mut();
+                if tab.cursor.y >= tab.buffer.line_count() {
+                    tab.cursor.y = tab.buffer.line_count().saturating_sub(1);
+                }
+                // Reset x position
+                let line_len = tab.buffer.line_length(tab.cursor.y);
+                if tab.cursor.x > line_len {
+                    tab.cursor.x = line_len.saturating_sub(1).max(0);
+                }
+                
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
+            KeyCode::Char('w') => {
+                // Delete word
+                let tab = self.current_tab_mut();
+                tab.buffer.delete_word_at_cursor(&mut tab.cursor);
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
+            KeyCode::Char('$') => {
+                // Delete to end of line
+                let tab = self.current_tab_mut();
+                tab.buffer.delete_to_end_of_line(&tab.cursor);
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
+            KeyCode::Char('^') | KeyCode::Char('0') => {
+                // Delete to beginning of line
+                let tab = self.current_tab_mut();
+                tab.buffer.delete_to_beginning_of_line(&tab.cursor);
+                self.update_viewport();
+                self.invalidate_highlight_cache();
+                self.mode = Mode::Normal;
+                Ok(true)
+            },
+            // Any other key cancels delete operation
+            _ => {
+                self.mode = Mode::Normal;
+                self.handle_normal_mode(key)
+            }
+        }
+    }
+    
     fn handle_snake_mode(&mut self, key: KeyEvent) -> Result<bool> {
         use crossterm::event::{KeyCode, KeyModifiers};
         
@@ -1315,6 +1382,17 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
     }
 
     fn handle_normal_mode(&mut self, key: KeyEvent) -> Result<bool> {
+        // Directly handle 'd' key to enter delete mode before checking bindings
+        if let KeyCode::Char('d') = key.code {
+            if !key.modifiers.contains(KeyModifiers::CONTROL) && 
+               !key.modifiers.contains(KeyModifiers::ALT) && 
+               !key.modifiers.contains(KeyModifiers::SHIFT) {
+                // Explicitly set the mode to Delete
+                self.mode = Mode::Delete;
+                return Ok(true);
+            }
+        }
+    
         let bindings = &self.config.key_bindings.normal_mode;
 
         // Check each command binding
@@ -1617,24 +1695,10 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                 self.save_and_quit = true;
                 self.mode = Mode::WriteConfirm;
             },
-            // Add handling for d (delete line)
+            // Add handling for d (enter delete mode)
             KeyCode::Char('d') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
-                let cursor_y = self.current_tab().cursor.y;
-                self.current_tab_mut().buffer.delete_line(cursor_y);
-                
-                // Adjust cursor if needed
-                let tab = self.current_tab_mut();
-                if tab.cursor.y >= tab.buffer.line_count() {
-                    tab.cursor.y = tab.buffer.line_count().saturating_sub(1);
-                }
-                // Reset x position
-                let line_len = tab.buffer.line_length(tab.cursor.y);
-                if tab.cursor.x > line_len {
-                    tab.cursor.x = line_len.saturating_sub(1).max(0);
-                }
-                
-                self.update_viewport();
-                self.invalidate_highlight_cache();
+                // Enter delete mode instead of immediately deleting the line
+                self.mode = Mode::Delete;
             },
             // o to open line below current line
             KeyCode::Char('o') if !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) && !key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -2269,10 +2333,10 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::config::Config;
     use std::fs;
     use tempfile::tempdir;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     
     #[test]
     fn test_tab_navigation() {
@@ -2747,5 +2811,62 @@ mod tests {
         assert_eq!(editor.current_tab().buffer.lines.len(), 2);
         assert_eq!(editor.current_tab().buffer.lines[0], "First line");
         assert_eq!(editor.current_tab().buffer.lines[1], "Third line");
+    }
+    
+    #[test]
+    fn test_delete_mode_functionality() {
+        // Create editor with some content
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // Set to Normal mode
+        editor.mode = Mode::Normal;
+        
+        // Setup buffer with test content
+        editor.current_tab_mut().buffer.lines = vec![
+            "First line of text".to_string(),
+            "Second line of text".to_string(),
+            "Third line with some words".to_string()
+        ];
+        
+        // Set cursor to start of second line
+        editor.current_tab_mut().cursor.y = 1;
+        editor.current_tab_mut().cursor.x = 0;
+        
+        // Press 'd' in normal mode should enter delete mode
+        let d_key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty());
+        let _ = editor.handle_key(d_key);
+        
+        // Verify we entered delete mode
+        assert_eq!(editor.mode, Mode::Delete);
+        
+        // Press 'd' again to delete the line
+        let _ = editor.handle_key(d_key);
+        
+        // Verify the line was deleted
+        assert_eq!(editor.current_tab().buffer.lines.len(), 2);
+        assert_eq!(editor.current_tab().buffer.lines[0], "First line of text");
+        assert_eq!(editor.current_tab().buffer.lines[1], "Third line with some words");
+        
+        // Verify we're back in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
+        
+        // Test word deletion (dw)
+        editor.current_tab_mut().cursor.y = 0;
+        editor.current_tab_mut().cursor.x = 0;
+        
+        // Press 'd' to enter delete mode
+        let _ = editor.handle_key(d_key);
+        assert_eq!(editor.mode, Mode::Delete);
+        
+        // Press 'w' to delete word
+        let w_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::empty());
+        let _ = editor.handle_key(w_key);
+        
+        // Verify the word was deleted (note: there may be a space before "line")
+        assert!(editor.current_tab().buffer.lines[0].trim() == "line of text");
+        
+        // Verify we're back in normal mode
+        assert_eq!(editor.mode, Mode::Normal);
     }
 }
