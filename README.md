@@ -22,12 +22,14 @@ A modern, fast terminal-based text editor with Vim-like keybindings, syntax high
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/zim.git
+git clone https://github.com/nkconnor/zim.git
 cd zim
 cargo build --release
 ```
 
 The binary will be available at `target/release/zim`.
+
+Alternatively, just run `cargo run --release`.
 
 ## Usage
 
@@ -109,6 +111,7 @@ theme = "dark"
 Create a `key_bindings.toml` file next to the config.toml:
 
 ```toml
+# Example showing basic customization
 [normal_mode]
 save_file = { key = "w" }
 reload_file = { key = "e" }
@@ -117,6 +120,101 @@ quit = { key = "q" }
 [insert_mode]
 normal_mode = { key = "esc" }
 ```
+
+### Available Commands for Keybinding Customization
+
+#### Normal Mode Commands
+```toml
+[normal_mode]
+# File operations
+quit = { key = "q" }                         # Quit editor
+save_file = { key = "w" }                    # Save current file
+reload_file = { key = "e" }                  # Reload file from disk
+save_and_quit = { key = "X" }                # Save and quit
+
+# Mode switching
+insert_mode = { key = "i" }                  # Enter insert mode
+show_help = { key = "h", modifiers = ["ctrl"] } # Show help
+
+# Navigation
+move_left = { key = "h" }                    # Move cursor left
+move_down = { key = "j" }                    # Move cursor down
+move_up = { key = "k" }                      # Move cursor up
+move_right = { key = "l" }                   # Move cursor right
+move_to_line_start = { key = "^" }           # Move to start of line
+move_to_line_end = { key = "$" }             # Move to end of line
+move_to_file_start = { key = "g" }           # Move to top of file
+move_to_file_end = { key = "G" }             # Move to bottom of file
+page_up = { key = "b", modifiers = ["ctrl"] }    # Page up
+page_down = { key = "f", modifiers = ["ctrl"] }  # Page down
+
+# Editing operations
+delete_line = { key = "d" }                  # Delete current line
+delete_char = { key = "x" }                  # Delete character and enter insert mode
+undo = { key = "u" }                         # Undo last action
+redo = { key = "r", modifiers = ["ctrl"] }   # Redo previously undone action
+
+# Tab management
+new_tab = { key = "n", modifiers = ["ctrl"] }        # Create new tab
+close_tab = { key = "w", modifiers = ["ctrl"] }      # Close current tab
+next_tab = { key = "right", modifiers = ["ctrl"] }   # Go to next tab
+prev_tab = { key = "left", modifiers = ["ctrl"] }    # Go to previous tab
+goto_tab_1 = { key = "f1" }                  # Go to tab 1
+goto_tab_2 = { key = "f2" }                  # Go to tab 2
+# ... through goto_tab_12 = { key = "f12" }
+
+# Features
+find_file = { key = "o", modifiers = ["ctrl"] }      # Open file finder
+token_search = { key = "t", modifiers = ["ctrl"] }   # Search for tokens
+run_cargo_check = { key = "d", modifiers = ["ctrl"] } # Run cargo check
+run_cargo_clippy = { key = "y", modifiers = ["ctrl"] } # Run cargo clippy
+snake_game = { key = "s" }                   # Easter egg: launch snake game
+```
+
+#### Insert Mode Commands
+```toml
+[insert_mode]
+normal_mode = { key = "esc" }                # Return to normal mode
+```
+
+#### Command Mode Commands
+```toml
+[command_mode]
+normal_mode = { key = "esc" }                # Return to normal mode
+```
+
+#### File Finder Mode Commands
+```toml
+[file_finder_mode]
+cancel = { key = "esc" }                     # Cancel file finder
+select = { key = "enter" }                   # Select file
+next = { key = "down" }                      # Next file
+previous = { key = "up" }                    # Previous file
+```
+
+#### Token Search Mode Commands
+```toml
+[token_search_mode]
+cancel = { key = "esc" }                     # Cancel token search
+select = { key = "enter" }                   # Select result
+next = { key = "down" }                      # Next result
+previous = { key = "up" }                    # Previous result
+```
+
+#### Help Mode Commands
+```toml
+[help_mode]
+normal_mode = { key = "esc" }                # Return to normal mode
+```
+
+You can specify key modifiers using the `modifiers` array:
+```toml
+# Example with modifiers
+save_file = { key = "s", modifiers = ["ctrl"] }      # Ctrl+S to save
+quit = { key = "q", modifiers = ["ctrl", "shift"] }  # Ctrl+Shift+Q to quit
+```
+
+Valid modifiers are: `"ctrl"`, `"alt"`, and `"shift"`.
 
 ## Contributing
 
