@@ -2127,29 +2127,20 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                                     !tab.buffer.is_modified && 
                                         (tab.buffer.lines.is_empty() || 
                                          (tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty())) &&
-                                        tab.buffer.file_path.is_none()
+                                        (tab.buffer.file_path.is_none() || 
+                                         tab.buffer.file_path.as_ref().unwrap().starts_with("untitled-"))
                                 };
                                 
-                                // Always use load_file_in_new_tab which has built-in duplicate detection
-                                // This either switches to an existing tab with this file or loads it in a new tab
-                                self.load_file_in_new_tab(&file_path)?;
-                                
-                                // If the current tab was empty and we created a new tab, close the empty one
-                                if current_tab_empty && self.current_tab != current_tab && self.tabs.len() > 1 {
-                                    // Store the new tab index
-                                    let new_tab = self.current_tab;
-                                    
-                                    // Close the empty tab
-                                    self.current_tab = current_tab;
-                                    self.close_tab();
-                                    
-                                    // Adjust new tab index if necessary
-                                    if new_tab > current_tab {
-                                        self.current_tab = new_tab - 1;
-                                    } else {
-                                        self.current_tab = new_tab;
-                                    }
+                                // If the current tab is empty, load directly in this tab
+                                if current_tab_empty {
+                                    self.load_file(&file_path)?;
+                                } else {
+                                    // Otherwise, use load_file_in_new_tab which has built-in duplicate detection
+                                    // This either switches to an existing tab with this file or loads it in a new tab
+                                    self.load_file_in_new_tab(&file_path)?;
                                 }
+                                
+                                // Note: No need to close the empty tab, as we now use it directly
                             }
                             self.mode = Mode::Normal;
                         }
@@ -2180,29 +2171,20 @@ pub fn run_cargo_clippy(&mut self, cargo_dir: &str) -> Result<()> {
                             !tab.buffer.is_modified && 
                                 (tab.buffer.lines.is_empty() || 
                                  (tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty())) &&
-                                tab.buffer.file_path.is_none()
+                                (tab.buffer.file_path.is_none() || 
+                                 tab.buffer.file_path.as_ref().unwrap().starts_with("untitled-"))
                         };
                         
-                        // Always use load_file_in_new_tab which has built-in duplicate detection
-                        // This either switches to an existing tab with this file or loads it in a new tab
-                        self.load_file_in_new_tab(&file_path)?;
-                        
-                        // If the current tab was empty and we created a new tab, close the empty one
-                        if current_tab_empty && self.current_tab != current_tab && self.tabs.len() > 1 {
-                            // Store the new tab index
-                            let new_tab = self.current_tab;
-                            
-                            // Close the empty tab
-                            self.current_tab = current_tab;
-                            self.close_tab();
-                            
-                            // Adjust new tab index if necessary
-                            if new_tab > current_tab {
-                                self.current_tab = new_tab - 1;
-                            } else {
-                                self.current_tab = new_tab;
-                            }
+                        // If the current tab is empty, load directly in this tab
+                        if current_tab_empty {
+                            self.load_file(&file_path)?;
+                        } else {
+                            // Otherwise, use load_file_in_new_tab which has built-in duplicate detection
+                            // This either switches to an existing tab with this file or loads it in a new tab
+                            self.load_file_in_new_tab(&file_path)?;
                         }
+                        
+                        // Note: No need to close the empty tab, as we now use it directly
                     }
                     self.mode = Mode::Normal;
                 }
@@ -2337,6 +2319,60 @@ mod tests {
         editor.next_tab();
         assert_eq!(editor.current_tab, 1);
         assert_eq!(editor.current_tab().buffer.get_content(), "File 2 content");
+    }
+    
+    #[test]
+    fn test_file_finder_empty_tab_reuse() {
+        use tempfile::tempdir;
+        
+        let config = Config::default();
+        let mut editor = Editor::new_with_config(config);
+        
+        // The editor starts in FileFinder mode with one empty tab
+        assert_eq!(editor.mode, Mode::FileFinder);
+        assert_eq!(editor.tabs.len(), 1);
+        
+        // Verify the first tab is empty
+        let tab = &editor.tabs[0];
+        assert!(!tab.buffer.is_modified);
+        assert_eq!(tab.buffer.lines.len(), 1);
+        assert_eq!(tab.buffer.lines[0], "");
+        // The default tab has an untitled-1 filename
+        assert!(tab.buffer.file_path.is_some());
+        assert!(tab.buffer.file_path.as_ref().unwrap().starts_with("untitled-"));
+        
+        // Create a temp file to load
+        let tmp_dir = tempdir().expect("Failed to create temp directory");
+        let file_path = tmp_dir.path().join("test_file.txt");
+        std::fs::write(&file_path, "Test content").expect("Failed to write test file");
+        let file_path_str = file_path.to_str().unwrap();
+        
+        // Simulate selecting a file in the file finder
+        // We'll use the empty tab detection logic directly to simulate what happens
+        let current_tab = editor.current_tab;
+        let current_tab_empty = {
+            let tab = &editor.tabs[current_tab];
+            !tab.buffer.is_modified && 
+                (tab.buffer.lines.is_empty() || 
+                    (tab.buffer.lines.len() == 1 && tab.buffer.lines[0].is_empty())) &&
+                (tab.buffer.file_path.is_none() || 
+                 tab.buffer.file_path.as_ref().unwrap().starts_with("untitled-"))
+        };
+        
+        // If the current tab is empty, load directly in this tab
+        if current_tab_empty {
+            editor.load_file(file_path_str).expect("Failed to load file");
+        } else {
+            editor.load_file_in_new_tab(file_path_str).expect("Failed to load file");
+        }
+        
+        // Verify we still have only one tab
+        assert_eq!(editor.tabs.len(), 1, "New tab was created instead of reusing the empty one");
+        
+        // Verify the file was loaded in the current tab
+        assert_eq!(editor.current_tab, 0);
+        assert_eq!(editor.current_tab().buffer.get_content(), "Test content");
+        assert_eq!(editor.current_tab().buffer.file_path.as_ref().unwrap(), file_path_str);
     }
     
     #[test]
